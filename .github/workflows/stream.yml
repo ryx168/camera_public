@@ -84,7 +84,7 @@ jobs:
       
       - name: Test Camera Access
         env:
-          CAMERA_PASSWORD: ${{ secrets.CAMERA_PASSWORD }}
+          CAM_PASS: ${{ secrets.CAM_PASS }}
         run: |
           echo "🔍 Testing camera connectivity..."
           
@@ -114,7 +114,7 @@ jobs:
         timeout-minutes: 355
         env:
           TWITCH_KEY: ${{ secrets.TWITCH_KEY }}
-          CAMERA_PASSWORD: ${{ secrets.CAMERA_PASSWORD }}
+          CAM_PASS: ${{ secrets.CAM_PASS }}
         run: |
           chmod +x start-stream.sh twitch.sh
 

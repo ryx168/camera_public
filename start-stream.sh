@@ -7,8 +7,8 @@ DEBUG_LOG="/home/runner/work/camera/camera/logs/ffmpeg-debug.log"
 LOCAL_DIR="/home/runner/work/camera/camera"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
-# Camera URLs — password from CAMERA_PASSWORD secret
-CAM_PASS="${CAMERA_PASSWORD:?CAMERA_PASSWORD secret is not set}"
+# Camera URLs — password from CAM_PASS secret
+CAM_PASS="${CAM_PASS:?CAM_PASS secret is not set}"
 declare -A CAMERA_URLS=(
     ["Office"]="http://192.168.1.31/video.cgi"
     ["Front"]="http://admin:${CAM_PASS}@192.168.1.38/video.cgi"
