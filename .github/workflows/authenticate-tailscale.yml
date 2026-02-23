@@ -1,0 +1,54 @@
+name: Generate Tailscale State
+
+on:
+  workflow_dispatch:
+
+jobs:
+  auth:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo systemctl stop tailscaled || true
+
+      - name: Authenticate and Generate State
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+        run: |
+          # Start tailscaled with state file
+          sudo tailscaled --state=/tmp/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock &
+          
+          # Wait for daemon to be ready
+          sleep 5
+          
+          # Authenticate using OAuth - CORRECT FORMAT
+          sudo tailscale up \
+            --authkey="tskey-client-${TS_OAUTH_CLIENT_ID}-${TS_OAUTH_SECRET}" \
+            --hostname="github-runner"
+          
+          # Wait for connection to establish
+          sleep 10
+          
+          # Verify connection
+          sudo tailscale status
+          
+          # Stop daemon to flush state
+          sudo pkill tailscaled
+          sleep 3
+          
+          # Verify state file
+          if [ ! -s /tmp/tailscaled.state ]; then
+            echo "❌ Error: State file is missing or empty!"
+            exit 1
+          fi
+          
+          echo "✅ State file generated successfully!"
+          echo "📊 State file size: $(stat -c%s /tmp/tailscaled.state) bytes"
+          echo ""
+          echo "📋 Copy the base64 string below and save it as TS_STATE_FILE secret:"
+          echo "═══════════════════════════════════════════════════════════════"
+          sudo base64 -w 0 /tmp/tailscaled.state
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"

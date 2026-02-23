@@ -1,0 +1,149 @@
+name: Camera Stream Workflow
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: camera-access
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Upgrade Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          echo "✅ Tailscale version: $(tailscale version)"
+      
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:shared
+          hostname: github-camera-stream
+          args: --accept-routes
+      
+      - name: Verify Connection
+        run: |
+          echo "📡 Tailscale Status:"
+          tailscale status
+          echo ""
+          echo "🌐 My IP:"
+          tailscale ip -4
+          echo ""
+          echo "🔍 Testing QNAP connectivity:"
+          ping -c 3 100.117.66.47 && echo "✅ QNAP reachable" || echo "❌ QNAP not reachable"
+      
+      - name: Setup SSH Tunnel to QNAP
+        run: |
+          # Install dependencies
+          sudo apt-get update
+          sudo apt-get install -y sshpass socat
+          
+          echo "Setting up SSH tunnel through QNAP for camera access..."
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get install -y ffmpeg curl fonts-freefont-ttf
+      
+      - name: Setup Environment
+        run: |
+          mkdir -p /tmp/camera-recordings
+          mkdir -p logs
+          export TZ="America/Vancouver"
+          echo "TZ=America/Vancouver" >> $GITHUB_ENV
+          echo "🕐 Current time: $(date)"
+
+      - name: Wait for Routes
+        run: |
+          echo "⏳ Waiting for subnet routes..."
+          sleep 10
+          for i in {1..36}; do
+            if ip route show table all | grep -q "192.168.1"; then
+              echo "✅ Routes established!"
+              ip route show table all | grep 192.168
+              break
+            fi
+            echo "Attempt $i/36: Waiting..."
+            sleep 5
+          done
+          
+          if ! ip route show table all | grep -q "192.168.1"; then
+            echo "❌ Routes never appeared"
+            tailscale status
+            exit 1
+          fi
+      
+      - name: Test Camera Access
+        env:
+          CAMERA_PASSWORD: ${{ secrets.CAMERA_PASSWORD }}
+        run: |
+          echo "🔍 Testing camera connectivity..."
+          
+          declare -A CAMERAS=(
+              ["Office"]="http://192.168.1.31/video.cgi"
+              ["Front"]="http://admin:${CAMERA_PASSWORD}@192.168.1.38/video.cgi"
+              ["Kitchen"]="http://admin:${CAMERA_PASSWORD}@192.168.1.33/video.cgi"
+              ["Balcony"]="http://admin:${CAMERA_PASSWORD}@192.168.1.35/video.cgi"
+              ["Backyard"]="http://admin:${CAMERA_PASSWORD}@192.168.1.39/video.cgi"
+          )
+          
+          ONLINE_COUNT=0
+          for name in Office Front Kitchen Balcony Backyard; do
+              url="${CAMERAS[$name]}"
+              if timeout 8 curl -s -I "$url" > /dev/null 2>&1; then
+                  echo "✅ $name camera is online"
+                  ONLINE_COUNT=$((ONLINE_COUNT + 1))
+              else
+                  echo "❌ $name camera is offline"
+              fi
+          done
+          
+          echo ""
+          echo "📹 $ONLINE_COUNT camera(s) accessible — continuing to stream..."
+      
+      - name: Stream to Twitch
+        timeout-minutes: 355
+        env:
+          TWITCH_KEY: ${{ secrets.TWITCH_KEY }}
+          CAMERA_PASSWORD: ${{ secrets.CAMERA_PASSWORD }}
+        run: |
+          chmod +x start-stream.sh twitch.sh
+
+          echo "$(date) - 🎥 Starting camera capture (start-stream.sh)..."
+          ./start-stream.sh &
+          START_STREAM_PID=$!
+          echo "start-stream.sh PID: $START_STREAM_PID"
+
+          # Give start-stream.sh time to begin capturing
+          sleep 15
+
+          echo "$(date) - 📡 Starting Twitch streamer (twitch.sh)..."
+          ./twitch.sh &
+          TWITCH_PID=$!
+          echo "twitch.sh PID: $TWITCH_PID"
+
+          # Wait for twitch.sh (main controller); if it exits, stop start-stream.sh too
+          wait $TWITCH_PID
+          echo "$(date) - ✅ twitch.sh finished"
+
+          kill $START_STREAM_PID 2>/dev/null || true
+          echo "$(date) - 🛑 start-stream.sh stopped"
+      
+      - name: Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-logs
+          path: logs/
+          retention-days: 7
+          if-no-files-found: ignore
+

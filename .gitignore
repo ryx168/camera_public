@@ -1,0 +1,17 @@
+# Secrets — never commit these
+.env
+
+# Debug session files (contain login credentials)
+ssh_connection.txt
+pinggy_ssh.log
+vscode_cf.log
+
+# VS Code Server session data
+.vscode-session/
+
+# Logs
+logs/
+*.log
+
+# Temp recordings
+/tmp/camera-recordings/

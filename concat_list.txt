@@ -1,0 +1,4 @@
+file '/home/runner/work/camera/camera/stream-20260222-204413.mp4'
+file '/home/runner/work/camera/camera/stream-20260222-204512.mp4'
+file '/home/runner/work/camera/camera/stream-20260222-204627.mp4'
+file '/home/runner/work/camera/camera/stream-20260222-204724.mp4'
