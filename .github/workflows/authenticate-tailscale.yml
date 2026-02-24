@@ -2,7 +2,11 @@ name: Generate Tailscale State
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 0 * * *'    # 00:00
+    - cron: '50 5 * * *'   # 05:50
+    - cron: '40 10 * * *'  # 10:40
+    - cron: '30 15 * * *'  # 15:30
+    - cron: '20 20 * * *'  # 20:20
   workflow_dispatch:
 
 jobs:
