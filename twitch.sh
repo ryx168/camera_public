@@ -41,6 +41,11 @@ restart_camera_service() {
         return 1
     fi
 
+    if [ -f "/tmp/no_space.flag" ]; then
+        log "🚨 CRITICAL: No space flag detected. Aborting restart."
+        return 1
+    fi
+
     log "🔄 Attempting to restart start-stream.sh..."
 
     pkill -f "start-stream.sh" 2>/dev/null || true
@@ -71,6 +76,21 @@ restart_stream() {
             pkill -9 -f "start-stream.sh"
             sleep 2
         fi
+    fi
+
+    # Ensure any orphaned ffmpeg processes connecting to cameras are also killed
+    if pgrep -f "ffmpeg.*video\.cgi" > /dev/null; then
+        log "🧹 CONTROLLER: Cleaning up orphaned capturing ffmpeg processes..."
+        pkill -9 -f "ffmpeg.*video\.cgi"
+        sleep 1
+    fi
+    if [ -f "/tmp/ffmpeg_stream.pid" ]; then
+        local pid=$(cat /tmp/ffmpeg_stream.pid)
+        if kill -0 "$pid" 2>/dev/null; then
+            log "🧹 CONTROLLER: Force killing PID $pid from pidfile..."
+            kill -9 "$pid" 2>/dev/null
+        fi
+        rm -f "/tmp/ffmpeg_stream.pid"
     fi
 
     if [ -x "./start-stream.sh" ]; then
@@ -160,6 +180,11 @@ log "⏱️  Max runtime: 6 hours"
 while true; do
     cycle_count=$((cycle_count + 1))
     log "🔄 Starting cycle #$cycle_count"
+
+    if [ -f "/tmp/no_space.flag" ]; then
+        log "🚨 CRITICAL: /tmp/no_space.flag found. Disk space exhausted. Quitting stream controller."
+        break
+    fi
 
     # Exit loop after 6 hours
     elapsed=$(( $(date +%s) - START_TIME ))

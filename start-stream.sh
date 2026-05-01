@@ -45,8 +45,8 @@ mkdir -p "$LOCAL_DIR"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 # File retention settings
-KEEP_HOURS=${KEEP_HOURS:-24}
-MAX_SPACE_GB=${MAX_SPACE_GB:-20}
+KEEP_HOURS=${KEEP_HOURS:-6}
+MAX_SPACE_GB=${MAX_SPACE_GB:-5}
 
 # Timeout and retry settings
 MAX_RETRY_COUNT=${MAX_RETRY_COUNT:-3}
@@ -78,14 +78,12 @@ cleanup() {
 
 trap cleanup SIGTERM SIGINT SIGQUIT
 
-# Check camera connectivity (quick - 3 second timeout)
+# Check camera connectivity using ffprobe (actually tests the stream)
 check_camera() {
     local url=$1
-    if timeout 3 curl -s -I "$url" > /dev/null 2>&1; then
-        return 0
-    else
-        return 1
-    fi
+    timeout 5 ffprobe -v quiet -analyzeduration 2000000 -probesize 2000000 \
+        -i "$url" -show_entries format=duration >/dev/null 2>&1
+    return $?
 }
 
 # Get online cameras
@@ -235,8 +233,9 @@ cleanup_old_files() {
         while [ $USED_SPACE_GB -gt $MAX_SPACE_GB ]; do
             OLDEST_FILE=$(find "$LOCAL_DIR" -type f -name "stream-*" 2>/dev/null | sort | head -n 1)
             if [ -z "$OLDEST_FILE" ]; then
-                echo "$(date) - 没有更多可删除的文件" | tee -a "$LOG_FILE"
-                break
+                echo "$(date) - 🚨 错误: 没有更多可删除的文件，但空间仍然超过限制。退出程序。" | tee -a "$LOG_FILE"
+                touch "/tmp/no_space.flag"
+                exit 1
             fi
 
             echo "$(date) - 删除最旧的文件: $OLDEST_FILE" | tee -a "$LOG_FILE"
@@ -245,6 +244,14 @@ cleanup_old_files() {
             USED_SPACE=$(du -s "$LOCAL_DIR" 2>/dev/null | awk '{print $1}')
             USED_SPACE_GB=$((USED_SPACE/1024/1024))
         done
+    fi
+
+    # Check absolute free space on disk
+    local free_space_mb=$(df -m "$LOCAL_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ ! -z "$free_space_mb" ] && [ "$free_space_mb" -lt 500 ]; then
+        echo "$(date) - 🚨 错误: 系统磁盘剩余空间不足 ($free_space_mb MB < 500 MB)。退出程序。" | tee -a "$LOG_FILE"
+        touch "/tmp/no_space.flag"
+        exit 1
     fi
 
     echo "$(date) - 文件清理完成，当前使用空间: ${USED_SPACE_GB}GB" | tee -a "$LOG_FILE"
@@ -358,6 +365,26 @@ start_ffmpeg() {
             return 0
         else
             echo "$(date) - ❌ FFmpeg异常退出: $EXIT_CODE" | tee -a "$LOG_FILE"
+            
+            # Exit code 8 = input open failure — re-verify with ffprobe this time
+            if [ $EXIT_CODE -eq 8 ]; then
+                echo "$(date) - 🔍 重新验证摄像头流 (ffprobe)..." | tee -a "$LOG_FILE"
+                local -a verified_urls=()
+                local -a verified_names=()
+                for i in "${!ONLINE_CAMERA_URLS[@]}"; do
+                    if timeout 5 ffprobe -v quiet -i "${ONLINE_CAMERA_URLS[$i]}" \
+                        -show_entries format=duration >/dev/null 2>&1; then
+                        verified_urls+=("${ONLINE_CAMERA_URLS[$i]}")
+                        verified_names+=("${ONLINE_CAMERA_NAMES[$i]}")
+                        echo "$(date) - ✅ 流验证通过: ${ONLINE_CAMERA_NAMES[$i]}" | tee -a "$LOG_FILE"
+                    else
+                        echo "$(date) - ⚠️ 流验证失败，移除: ${ONLINE_CAMERA_NAMES[$i]}" | tee -a "$LOG_FILE"
+                    fi
+                done
+                ONLINE_CAMERA_URLS=("${verified_urls[@]}")
+                ONLINE_CAMERA_NAMES=("${verified_names[@]}")
+            fi
+            
             ((retry_count++))
 
             if [ $retry_count -lt $MAX_RETRY_COUNT ]; then
