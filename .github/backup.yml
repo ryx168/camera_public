@@ -39,21 +39,8 @@ jobs:
           echo "🌐 My IP:"
           tailscale ip -4
           echo ""
-          echo "🔍 Testing QNAP connectivity..."
-          
-          PRIMARY_QNAP="100.65.165.65"
-          FAILOVER_QNAP="100.97.131.42"
-          
-          if ping -c 3 $PRIMARY_QNAP > /dev/null 2>&1; then
-            echo "✅ Primary QNAP reachable"
-            echo "QNAP_IP=$PRIMARY_QNAP" >> $GITHUB_ENV
-          elif ping -c 3 $FAILOVER_QNAP > /dev/null 2>&1; then
-            echo "⚠️ Primary down, using failover QNAP"
-            echo "QNAP_IP=$FAILOVER_QNAP" >> $GITHUB_ENV
-          else
-            echo "❌ Both QNAPs unreachable"
-            exit 1
-          fi
+          echo "🔍 Testing QNAP connectivity:"
+          ping -c 3 100.117.66.47 && echo "✅ QNAP reachable" || echo "❌ QNAP not reachable"
       
       - name: Setup SSH Tunnel to QNAP
         run: |
@@ -77,17 +64,18 @@ jobs:
 
       - name: Wait for Routes
         run: |
-          echo "⏳ Waiting for subnet routes via $QNAP_IP..."
+          echo "⏳ Waiting for subnet routes..."
           sleep 10
           for i in {1..36}; do
             if ip route show table all | grep -q "192.168.1"; then
               echo "✅ Routes established!"
+              ip route show table all | grep 192.168
               break
             fi
             echo "Attempt $i/36: Waiting..."
             sleep 5
           done
-
+          
           if ! ip route show table all | grep -q "192.168.1"; then
             echo "❌ Routes never appeared"
             tailscale status
