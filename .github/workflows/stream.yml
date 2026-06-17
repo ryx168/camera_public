@@ -42,7 +42,7 @@ jobs:
           echo "🔍 Testing QNAP connectivity..."
           
           PRIMARY_QNAP="100.78.133.121"
-          FAILOVER_QNAP="100.77.130.68"
+          FAILOVER_QNAP="100.81.108.48"
           
           if ping -c 3 $PRIMARY_QNAP > /dev/null 2>&1; then
             echo "✅ Primary QNAP reachable"
