@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import json
+import base64
 import argparse
 import datetime
 import urllib.request
@@ -85,7 +86,7 @@ class MultiCameraPersonDetector:
         self.log(f"AI Person Detector initialized for cameras: {cam_summary}")
         self.log(f"Settings: check_interval={check_interval}s, confidence={confidence_threshold}, cooldown={cooldown_seconds}s")
         if self.enable_email:
-            self.log(f"📧 Email alerts active -> Recipient: {self.email_to} (via {self.smtp_host}:{self.smtp_port})")
+            self.log(f"Email alerts active -> Recipient: {self.email_to} (via {self.smtp_host}:{self.smtp_port})")
 
     def obfuscate_url(self, url):
         """Hide password in log outputs"""
@@ -100,7 +101,7 @@ class MultiCameraPersonDetector:
         """Append log entry to text log file and print to stdout"""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         formatted = f"[{timestamp}] {message}"
-        
+
         try:
             print(formatted, flush=True)
         except UnicodeEncodeError:
@@ -144,30 +145,41 @@ class MultiCameraPersonDetector:
                 self.log(f"⚠️ Failed to write event JSON ({target_file}): {e}")
 
     def send_email_alert(self, camera_name, count, snapshot_path):
-        """Send email alert with attached snapshot image to recipient"""
+        """Send email alert with attached & embedded snapshot image to recipient"""
         if not self.enable_email or not self.email_to:
             return
 
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         subject = f"🚨 AI Camera Alert: Person Detected at [{camera_name}] Camera"
 
-        msg = MIMEMultipart("related")
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
         msg["From"] = self.email_from
         msg["To"] = self.email_to
 
+        # Prepare Base64 inline image if snapshot exists
+        b64_image = ""
+        has_snapshot = snapshot_path and Path(snapshot_path).exists()
+        if has_snapshot:
+            try:
+                with open(snapshot_path, "rb") as f:
+                    b64_image = base64.b64encode(f.read()).decode("utf-8")
+            except Exception as e:
+                self.log(f"⚠️ Could not encode snapshot to base64: {e}")
+
         html_body = f"""
         <html>
-        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
-            <div style="background-color: #d9534f; color: white; padding: 15px; border-radius: 5px;">
-                <h2 style="margin: 0;">🚨 AI Camera Person Detection Alert</h2>
+        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 650px; margin: 0 auto; padding: 20px;">
+            <div style="background-color: #d9534f; color: white; padding: 16px 20px; border-radius: 8px 8px 0 0;">
+                <h2 style="margin: 0; font-size: 20px;">🚨 AI Camera Person Detection Alert</h2>
             </div>
-            <div style="padding: 15px; border: 1px solid #ddd; margin-top: 10px; border-radius: 5px;">
-                <p><b>Camera Name:</b> {camera_name}</p>
-                <p><b>People Count:</b> {count}</p>
-                <p><b>Detection Time:</b> {now_str}</p>
-                <p>An annotated snapshot captured from the camera feed is attached below.</p>
-                {"<br><img src='cid:snapshot_image' style='max-width: 100%; border: 3px solid #d9534f; border-radius: 5px;' />" if snapshot_path and Path(snapshot_path).exists() else ""}
+            <div style="padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 8px 8px; background-color: #fafafa;">
+                <p style="font-size: 16px; margin-top: 0;"><b>Camera Name:</b> <span style="color: #d9534f; font-weight: bold;">{camera_name}</span></p>
+                <p style="font-size: 16px;"><b>People Count:</b> {count}</p>
+                <p style="font-size: 16px;"><b>Detection Time:</b> {now_str}</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="font-size: 14px; color: #555;"><b>Snapshot Captured:</b></p>
+                {"<div style='text-align: center;'><img src='data:image/jpeg;base64," + b64_image + "' style='max-width: 100%; border: 3px solid #d9534f; border-radius: 6px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);' /></div>" if b64_image else "<p style='color:#999;'>No snapshot available.</p>"}
             </div>
         </body>
         </html>
@@ -175,21 +187,23 @@ class MultiCameraPersonDetector:
 
         msg.attach(MIMEText(html_body, "html"))
 
-        if snapshot_path and Path(snapshot_path).exists():
+        # Attach image as standard MIME attachment for full email client compatibility
+        if has_snapshot:
             try:
                 with open(snapshot_path, "rb") as f:
                     img_data = f.read()
 
-                img_part = MIMEImage(img_data, name=Path(snapshot_path).name)
-                img_part.add_header("Content-ID", "<snapshot_image>")
-                img_part.add_header("Content-Disposition", "inline", filename=Path(snapshot_path).name)
+                filename = Path(snapshot_path).name
+                img_part = MIMEImage(img_data, name=filename)
+                img_part.add_header("Content-ID", f"<{filename}>")
+                img_part.add_header("Content-Disposition", "attachment", filename=filename)
                 msg.attach(img_part)
             except Exception as e:
                 self.log(f"⚠️ Failed to attach snapshot image to email: {e}")
 
         try:
             self.log(f"📧 Sending email alert to {self.email_to} for [{camera_name}]...")
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=12) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_pass)
                 server.send_message(msg)
@@ -240,18 +254,55 @@ class MultiCameraPersonDetector:
         except Exception as e:
             self.log(f"⚠️ Alert command execution failed for [{camera_name}]: {e}")
 
-    def capture_frame(self, camera_url):
-        """Capture single frame from stream URL via OpenCV VideoCapture"""
-        cap = cv2.VideoCapture(camera_url)
-        if not cap.isOpened():
-            return None
-
-        ret, frame = cap.read()
-        cap.release()
-
-        if ret and frame is not None and frame.size > 0:
-            return frame
+    def capture_frame_ffmpeg(self, camera_url):
+        """Fallback method to capture a frame using ffmpeg CLI"""
+        try:
+            cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-y",
+                "-i", camera_url,
+                "-vframes", "1",
+                "-f", "image2pipe",
+                "-vcodec", "mjpeg",
+                "-"
+            ]
+            pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = pipe.communicate(timeout=8)
+            if out:
+                img_np = np.frombuffer(out, dtype=np.uint8)
+                frame = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+                if frame is not None and frame.size > 0 and np.mean(frame) > 10.0:
+                    return frame
+        except Exception:
+            pass
         return None
+
+    def capture_frame(self, camera_url):
+        """
+        Capture single frame from stream URL via OpenCV VideoCapture
+        Flushes initial warm-up frames and validates brightness (mean > 10.0)
+        """
+        cap = cv2.VideoCapture(camera_url)
+        frame = None
+
+        if cap.isOpened():
+            # Read up to 5 warm-up frames to clear initial black/empty buffer frames
+            for _ in range(5):
+                ret, img = cap.read()
+                if ret and img is not None and img.size > 0:
+                    # Ensure image is valid and not pure black
+                    if np.mean(img) > 10.0:
+                        frame = img
+                        break
+            cap.release()
+
+        # Fallback to ffmpeg if OpenCV fails or returns black image
+        if frame is None or np.mean(frame) <= 10.0:
+            frame = self.capture_frame_ffmpeg(camera_url)
+
+        return frame
 
     def detect_people(self, frame):
         """
