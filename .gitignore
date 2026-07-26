@@ -15,3 +15,7 @@ logs/
 
 # Temp recordings
 /tmp/camera-recordings/
+
+# Python cache
+__pycache__/
+

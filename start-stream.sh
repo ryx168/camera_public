@@ -73,6 +73,7 @@ cleanup() {
         fi
         rm -f "$PID_FILE"
     fi
+    pkill -f "front_door_ai.py" 2>/dev/null || true
     exit 0
 }
 
@@ -415,6 +416,16 @@ main() {
 
     # Initial cleanup
     cleanup_old_files
+
+    # Launch Front Door AI detector if enabled
+    if [ "${ENABLE_AI_FRONT_DOOR:-true}" != "false" ] && [ -f "./front_door_ai.py" ]; then
+        if ! pgrep -f "front_door_ai.py" > /dev/null; then
+            echo "$(date) - 🚪 启动 Front Door AI 人员检测服务..." | tee -a "$LOG_FILE"
+            python3 front_door_ai.py > logs/front_door_ai.log 2>&1 &
+            AI_PID=$!
+            echo "$(date) - ✅ Front Door AI 人员检测 PID: $AI_PID" | tee -a "$LOG_FILE"
+        fi
+    fi
 
     # Main loop
     while true; do
