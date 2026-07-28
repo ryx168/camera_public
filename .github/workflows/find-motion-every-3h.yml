@@ -34,6 +34,6 @@ jobs:
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
           subject: Twitch Motion Check Report
-          to: ${{ secrets.MAIL_TO }}
-          from: Twitch Motion Bot
+          to: harry@superesolutions.com
+          from: harry@supere.ca
           body: file://report.txt
