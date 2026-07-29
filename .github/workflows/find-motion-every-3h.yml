@@ -34,9 +34,11 @@ jobs:
         with:
           server_address: ${{ secrets.SMTP_SERVER || secrets.SMTP_HOST || 'smtp.postmarkapp.com' }}
           server_port: ${{ secrets.SMTP_PORT || '587' }}
-          username: ${{ secrets.SMTP_USERNAME || secrets.SMTP_USER }}
-          password: ${{ secrets.SMTP_PASSWORD || secrets.SMTP_PASS }}
+          username: ${{ secrets.SMTP_USERNAME || secrets.SMTP_USER || '8f23463b-5db0-4bfb-9adc-fa13016656d2' }}
+          password: ${{ secrets.SMTP_PASSWORD || secrets.SMTP_PASS || '8f23463b-5db0-4bfb-9adc-fa13016656d2' }}
           subject: Twitch Motion Check Report
           to: harry@superesolutions.com
-          from: harry@supere.ca
+          from: ${{ secrets.SMTP_FROM || 'harry@superesolutions.com' }}
           body: file://report.txt
+
+
