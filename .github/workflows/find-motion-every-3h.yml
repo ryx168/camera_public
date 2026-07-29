@@ -23,7 +23,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yt-dlp opencv-contrib-python-headless
+          pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless || true
+          pip install --no-cache-dir yt-dlp opencv-contrib-python-headless
+          python -c "import cv2; print(cv2.__version__); print('HOGDescriptor present:', hasattr(cv2, 'HOGDescriptor'))"
 
       - name: Run motion check
         run: python check_recent_motion.py
