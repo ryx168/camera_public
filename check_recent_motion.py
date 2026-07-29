@@ -1,4 +1,4 @@
-import json, subprocess, cv2, os, datetime
+import json, subprocess, cv2, os, datetime, sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Initialize HOG people detector safely
@@ -11,11 +11,13 @@ except AttributeError:
 
 # 1. Fetch recent videos
 print("Fetching recent videos metadata...")
-res = subprocess.run(['python', '-m', 'yt_dlp', '--flat-playlist', '--dump-json', '--playlist-items', '1-400', 'https://www.twitch.tv/elarathornfield168/videos?filter=all&sort=time'], capture_output=True, text=True)
+res = subprocess.run([sys.executable, '-m', 'yt_dlp', '--flat-playlist', '--dump-json', '--playlist-items', '1-400', 'https://www.twitch.tv/elarathornfield168/videos?filter=all&sort=time'], capture_output=True, text=True)
 
 lines = res.stdout.strip().split('\n')
 if not lines or lines[0] == '':
     print("Failed to fetch videos")
+    if res.stderr:
+        print("yt_dlp stderr:", res.stderr)
     with open("report.txt", "w") as f:
         f.write("no find (failed to fetch video metadata from Twitch)")
     exit(1)
@@ -47,7 +49,7 @@ ids = [v['id'] for v in recent_videos]
 
 def get_stream_url(vid):
     url = f'https://www.twitch.tv/videos/{vid[1:]}'
-    res = subprocess.run(['python', '-m', 'yt_dlp', '-g', url], capture_output=True, text=True)
+    res = subprocess.run([sys.executable, '-m', 'yt_dlp', '-g', url], capture_output=True, text=True)
     return vid, url, res.stdout.strip()
 
 print("Fetching stream URLs in parallel...")
