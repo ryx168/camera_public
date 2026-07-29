@@ -1,6 +1,10 @@
 import json, subprocess, cv2, os, datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Initialize HOG people detector
+hog = cv2.HOGDescriptor()
+hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
 # 1. Fetch recent videos
 print("Fetching recent videos metadata...")
 res = subprocess.run(['python', '-m', 'yt_dlp', '--flat-playlist', '--dump-json', '--playlist-items', '1-400', 'https://www.twitch.tv/elarathornfield168/videos?filter=all&sort=time'], capture_output=True, text=True)
@@ -31,7 +35,6 @@ for v in videos:
         recent_videos.append(v)
 
 if not recent_videos:
-    # fallback, maybe timezones are off, just use first 300
     recent_videos = videos[:300]
 
 print(f"Found {len(recent_videos)} videos in the last 3 hours")
@@ -54,10 +57,12 @@ with ThreadPoolExecutor(max_workers=10) as executor:
         if (i+1) % 50 == 0:
             print(f"Fetched {i+1} URLs...")
 
-print(f"Got {len(stream_urls)} valid streams. Starting motion detection...")
+print(f"Got {len(stream_urls)} valid streams. Starting motion & person detection...")
 
 video_scores = []
-MOTION_THRESHOLD = 15000
+MOTION_THRESHOLD = 12000
+MIN_PERSON_HEIGHT = 65  # Minimum bounding box height on 800px crop (ignores distant pedestrians/cars)
+MIN_CONFIDENCE = 0.35
 
 for idx, vid in enumerate(ids):
     if vid not in stream_urls: continue
@@ -67,19 +72,21 @@ for idx, vid in enumerate(ids):
     ret, prev_frame = cap.read()
     if not ret: continue
     
-    # Front camera is roughly x=426:853, y=0:240
-    def get_front_gray(frame):
+    def get_front_crop(frame):
         h, w = frame.shape[:2]
         if w >= 1280:
             crop = frame[0:240, 426:853]
         else:
             crop = frame[0:h//2, w//3:(w//3)*2]
-        return cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        
-    prev_gray = get_front_gray(prev_frame)
+        return crop
+
+    prev_crop = get_front_crop(prev_frame)
+    prev_gray = cv2.cvtColor(prev_crop, cv2.COLOR_BGR2GRAY)
     
     max_motion = 0
     max_frame_idx = 0
+    person_close_detected = False
+    best_person_details = None
     frame_count = 1
     
     fps = cap.get(cv2.CAP_PROP_FPS) or 20
@@ -87,7 +94,6 @@ for idx, vid in enumerate(ids):
     if skip < 1: skip = 1
     
     while True:
-        # Skip frames
         for _ in range(skip - 1):
             cap.read()
             frame_count += 1
@@ -96,9 +102,9 @@ for idx, vid in enumerate(ids):
         if not ret: break
         frame_count += 1
         
-        gray = get_front_gray(frame)
+        crop = get_front_crop(frame)
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         
-        # Calculate absolute difference
         diff = cv2.absdiff(prev_gray, gray)
         _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
         
@@ -106,11 +112,26 @@ for idx, vid in enumerate(ids):
         if motion > max_motion:
             max_motion = motion
             max_frame_idx = frame_count
+
+        # If frame motion exceeds threshold, run HOG person detection to verify if person is close to house
+        if motion > MOTION_THRESHOLD:
+            crop_resized = cv2.resize(crop, (800, int(crop.shape[0] * (800 / crop.shape[1]))))
+            rects, weights = hog.detectMultiScale(crop_resized, winStride=(8, 8), padding=(8, 8), scale=1.05)
+            
+            for (x, y, w, h), weight in zip(rects, weights):
+                # Filter out small/distant detections (far on street/background)
+                if weight >= MIN_CONFIDENCE and h >= MIN_PERSON_HEIGHT:
+                    person_close_detected = True
+                    best_person_details = (motion, frame_count / fps, h, weight)
+                    break
             
         prev_gray = gray
 
     cap.release()
-    video_scores.append((max_motion, vid, url, max_frame_idx / fps))
+
+    if person_close_detected and best_person_details:
+        motion, timestamp, p_height, p_weight = best_person_details
+        video_scores.append((motion, vid, url, timestamp, p_height, p_weight))
     
     if (idx + 1) % 50 == 0:
         print(f"Processed {idx + 1} videos...")
@@ -118,16 +139,15 @@ for idx, vid in enumerate(ids):
 video_scores.sort(key=lambda x: x[0], reverse=True)
 
 with open("report.txt", "w") as f:
-    if video_scores and video_scores[0][0] > MOTION_THRESHOLD:
-        score, vid, url, t = video_scores[0]
+    if video_scores:
+        score, vid, url, t, h, w_conf = video_scores[0]
         f.write(f"PERSON FOUND!\n\n")
         f.write(f"Top video: {url} at {t:.1f}s\n")
-        f.write(f"Motion Score: {score} pixels\n\n")
+        f.write(f"Motion Score: {score} pixels (Person height: {h}px, conf: {w_conf:.2f})\n\n")
         f.write("Other top candidates:\n")
         for i in range(1, min(5, len(video_scores))):
-            score, vid, url, t = video_scores[i]
-            if score > MOTION_THRESHOLD:
-                f.write(f"Rank {i+1}: {url} at {t:.1f}s (Score: {score})\n")
+            score, vid, url, t, h, w_conf = video_scores[i]
+            f.write(f"Rank {i+1}: {url} at {t:.1f}s (Score: {score})\n")
     else:
         f.write("no find\n")
 
