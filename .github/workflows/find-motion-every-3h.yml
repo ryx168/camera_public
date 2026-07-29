@@ -8,6 +8,7 @@ on:
 jobs:
   check-motion:
     runs-on: ubuntu-latest
+    environment: camera-access
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
     steps:
@@ -31,10 +32,10 @@ jobs:
         if: always()
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
+          server_address: ${{ secrets.SMTP_SERVER || secrets.SMTP_HOST || 'smtp.postmarkapp.com' }}
+          server_port: ${{ secrets.SMTP_PORT || '587' }}
+          username: ${{ secrets.SMTP_USERNAME || secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD || secrets.SMTP_PASS }}
           subject: Twitch Motion Check Report
           to: harry@superesolutions.com
           from: harry@supere.ca
