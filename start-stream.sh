@@ -139,7 +139,7 @@ build_filter_complex() {
                     [base][cam0] overlay=shortest=1:x=0:y=0 [tmp1]; \
                     [tmp1][cam1] overlay=shortest=1:x=${half_width}:y=0 [tmp2]; \
                     [tmp2] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
-                    text='${names[0]}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
+                    text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[1]}':x=$((half_width + 10)):y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [out]"
             ;;
@@ -155,7 +155,7 @@ build_filter_complex() {
                     [tmp1][cam1] overlay=shortest=1:x=${half_width}:y=0 [tmp2]; \
                     [tmp2][cam2] overlay=shortest=1:x=0:y=${half_height} [tmp3]; \
                     [tmp3] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
-                    text='${names[0]}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
+                    text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[1]}':x=$((half_width + 10)):y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt2]; \
                     [txt2] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
@@ -175,7 +175,7 @@ build_filter_complex() {
                     [tmp2][cam2] overlay=shortest=1:x=0:y=${half_height} [tmp3]; \
                     [tmp3][cam3] overlay=shortest=1:x=${half_width}:y=${half_height} [tmp4]; \
                     [tmp4] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
-                    text='${names[0]}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
+                    text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[1]}':x=$((half_width + 10)):y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt2]; \
                     [txt2] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
