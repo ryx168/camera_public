@@ -1,9 +1,13 @@
 import json, subprocess, cv2, os, datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Initialize HOG people detector
-hog = cv2.HOGDescriptor()
-hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+# Initialize HOG people detector safely
+try:
+    hog = cv2.HOGDescriptor()
+    hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+except AttributeError:
+    print("Warning: cv2.HOGDescriptor not available in this OpenCV build. Falling back to motion detection.")
+    hog = None
 
 # 1. Fetch recent videos
 print("Fetching recent videos metadata...")
@@ -115,15 +119,19 @@ for idx, vid in enumerate(ids):
 
         # If frame motion exceeds threshold, run HOG person detection to verify if person is close to house
         if motion > MOTION_THRESHOLD:
-            crop_resized = cv2.resize(crop, (800, int(crop.shape[0] * (800 / crop.shape[1]))))
-            rects, weights = hog.detectMultiScale(crop_resized, winStride=(8, 8), padding=(8, 8), scale=1.05)
-            
-            for (x, y, w, h), weight in zip(rects, weights):
-                # Filter out small/distant detections (far on street/background)
-                if weight >= MIN_CONFIDENCE and h >= MIN_PERSON_HEIGHT:
-                    person_close_detected = True
-                    best_person_details = (motion, frame_count / fps, h, weight)
-                    break
+            if hog is not None:
+                crop_resized = cv2.resize(crop, (800, int(crop.shape[0] * (800 / crop.shape[1]))))
+                rects, weights = hog.detectMultiScale(crop_resized, winStride=(8, 8), padding=(8, 8), scale=1.05)
+                
+                for (x, y, w, h), weight in zip(rects, weights):
+                    # Filter out small/distant detections (far on street/background)
+                    if weight >= MIN_CONFIDENCE and h >= MIN_PERSON_HEIGHT:
+                        person_close_detected = True
+                        best_person_details = (motion, frame_count / fps, h, weight)
+                        break
+            else:
+                person_close_detected = True
+                best_person_details = (motion, frame_count / fps, 0, 1.0)
             
         prev_gray = gray
 
