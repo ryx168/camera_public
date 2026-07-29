@@ -1,0 +1,58 @@
+name: Send Test Email
+
+on:
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: 'Email Subject'
+        required: false
+        default: 'GitHub Actions Test Email'
+      body:
+        description: 'Email Body Content'
+        required: false
+        default: 'This is a test email sent from GitHub Actions workflow.'
+
+jobs:
+  send-email:
+    runs-on: ubuntu-latest
+    environment: camera-access
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Send Email
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER || secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME || secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          EMAIL_SUBJECT: ${{ github.event.inputs.subject || 'GitHub Actions Test Email' }}
+          EMAIL_BODY: ${{ github.event.inputs.body || 'This is a test email sent from GitHub Actions workflow.' }}
+        run: |
+          python -c "
+          import os, smtplib
+          from email.mime.text import MIMEText
+
+          subject = os.environ.get('EMAIL_SUBJECT', 'GitHub Actions Test Email')
+          body = os.environ.get('EMAIL_BODY', 'This is a test email sent from GitHub Actions workflow.')
+
+          msg = MIMEText(body, 'plain', 'utf-8')
+          msg['Subject'] = subject
+          msg['From'] = os.environ.get('SMTP_FROM') or 'harry@superesolutions.com'
+          msg['To'] = 'harry@superesolutions.com'
+
+          smtp_host = os.environ.get('SMTP_SERVER') or 'smtp.postmarkapp.com'
+          smtp_port = int(os.environ.get('SMTP_PORT') or 587)
+          smtp_user = os.environ.get('SMTP_USERNAME') or '8f23463b-5db0-4bfb-9adc-fa13016656d2'
+          smtp_pass = os.environ.get('SMTP_PASSWORD') or '8f23463b-5db0-4bfb-9adc-fa13016656d2'
+
+          print(f'Sending email to harry@superesolutions.com via {smtp_host}:{smtp_port}...')
+          with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+              server.starttls()
+              server.login(smtp_user, smtp_pass)
+              server.send_message(msg)
+          print('SUCCESS: Email sent successfully!')
+          "
