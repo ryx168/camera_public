@@ -40,9 +40,6 @@ for v in videos:
     elif v.get('timestamp') and v['timestamp'] >= target_epoch:
         recent_videos.append(v)
 
-if not recent_videos:
-    recent_videos = videos[:300]
-
 print(f"Found {len(recent_videos)} videos in the last 3 hours")
 
 ids = [v['id'] for v in recent_videos]
