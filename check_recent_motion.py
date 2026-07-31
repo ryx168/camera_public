@@ -1,6 +1,10 @@
 import json, subprocess, cv2, os, datetime, sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+CHECK_AREA = os.environ.get('CHECK_AREA', 'house_around')
+TARGET_OBJECT = os.environ.get('TARGET_OBJECT', 'person')
+
+
 # Initialize HOG people detector safely
 try:
     hog = cv2.HOGDescriptor()
@@ -18,8 +22,9 @@ if not lines or lines[0] == '':
     print("Failed to fetch videos")
     if res.stderr:
         print("yt_dlp stderr:", res.stderr)
-    with open("report.txt", "w") as f:
-        f.write("no find (failed to fetch video metadata from Twitch)")
+    with open("report.txt", "a") as f:
+        f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
+        f.write("no find (failed to fetch video metadata from Twitch)\n\n")
     exit(1)
 
 videos = []
@@ -132,9 +137,9 @@ for idx, vid in enumerate(ids):
             max_motion = motion
             max_frame_idx = frame_count
 
-        # If frame motion exceeds threshold, run HOG person detection to verify if person is close to house
+        # If frame motion exceeds threshold, run HOG person detection if target is person
         if motion > MOTION_THRESHOLD:
-            if hog is not None:
+            if TARGET_OBJECT == 'person' and hog is not None:
                 crop_resized = cv2.resize(crop, (800, int(crop.shape[0] * (800 / crop.shape[1]))))
                 rects, weights = hog.detectMultiScale(crop_resized, winStride=(8, 8), padding=(8, 8), scale=1.05)
                 
@@ -161,10 +166,11 @@ for idx, vid in enumerate(ids):
 
 video_scores.sort(key=lambda x: x[0], reverse=True)
 
-with open("report.txt", "w") as f:
+with open("report.txt", "a") as f:
+    f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
     if video_scores:
         score, vid, url, t, h, w_conf = video_scores[0]
-        f.write(f"PERSON FOUND!\n\n")
+        f.write(f"OBJECT FOUND!\n\n")
         f.write(f"Top video: {url} at {t:.1f}s\n")
         f.write(f"Motion Score: {score} pixels (Person height: {h}px, conf: {w_conf:.2f})\n\n")
         f.write("Other top candidates:\n")
@@ -173,5 +179,6 @@ with open("report.txt", "w") as f:
             f.write(f"Rank {i+1}: {url} at {t:.1f}s (Score: {score})\n")
     else:
         f.write("no find\n")
+    f.write("\n")
 
 print("Report generated.")

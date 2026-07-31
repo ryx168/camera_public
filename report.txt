@@ -1,10 +1,10 @@
 PERSON FOUND!
 
-Top video: https://www.twitch.tv/videos/2831692830 at 15.1s
-Motion Score: 89173 pixels
+Top video: https://www.twitch.tv/videos/2833002021 at 15.6s
+Motion Score: 64552 pixels (Person height: 185px, conf: 0.60)
 
 Other top candidates:
-Rank 2: https://www.twitch.tv/videos/2831681732 at 34.0s (Score: 81695)
-Rank 3: https://www.twitch.tv/videos/2831681220 at 34.0s (Score: 81695)
-Rank 4: https://www.twitch.tv/videos/2831680694 at 34.0s (Score: 81695)
-Rank 5: https://www.twitch.tv/videos/2831683443 at 25.1s (Score: 81618)
+Rank 2: https://www.twitch.tv/videos/2833001544 at 15.6s (Score: 64552)
+Rank 3: https://www.twitch.tv/videos/2833001077 at 15.6s (Score: 64552)
+Rank 4: https://www.twitch.tv/videos/2833004002 at 7.0s (Score: 64513)
+Rank 5: https://www.twitch.tv/videos/2833180115 at 21.6s (Score: 55025)
