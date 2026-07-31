@@ -40,6 +40,9 @@ for v in videos:
     elif v.get('timestamp') and v['timestamp'] >= target_epoch:
         recent_videos.append(v)
 
+if not recent_videos:
+    recent_videos = videos[:300]
+
 print(f"Found {len(recent_videos)} videos in the last 3 hours")
 
 ids = [v['id'] for v in recent_videos]
@@ -62,10 +65,18 @@ with ThreadPoolExecutor(max_workers=10) as executor:
 
 print(f"Got {len(stream_urls)} valid streams. Starting motion & person detection...")
 
+# Check Area / Region of Interest (ROI) configuration
+# Default ROI focuses on the house and immediate surrounding area (porch, door, yard, driveway)
+# Ignores upper 20% background (sky, street, passing cars)
+ROI_Y_MIN = float(os.environ.get('ROI_Y_MIN', '0.20'))
+ROI_Y_MAX = float(os.environ.get('ROI_Y_MAX', '1.0'))
+ROI_X_MIN = float(os.environ.get('ROI_X_MIN', '0.0'))
+ROI_X_MAX = float(os.environ.get('ROI_X_MAX', '1.0'))
+
 video_scores = []
-MOTION_THRESHOLD = 12000
-MIN_PERSON_HEIGHT = 65  # Minimum bounding box height on 800px crop (ignores distant pedestrians/cars)
-MIN_CONFIDENCE = 0.35
+MOTION_THRESHOLD = int(os.environ.get('MOTION_THRESHOLD', '9500'))
+MIN_PERSON_HEIGHT = int(os.environ.get('MIN_PERSON_HEIGHT', '65'))  # Minimum bounding box height on 800px crop
+MIN_CONFIDENCE = float(os.environ.get('MIN_CONFIDENCE', '0.35'))
 
 for idx, vid in enumerate(ids):
     if vid not in stream_urls: continue
@@ -81,7 +92,12 @@ for idx, vid in enumerate(ids):
             crop = frame[0:240, 426:853]
         else:
             crop = frame[0:h//2, w//3:(w//3)*2]
-        return crop
+            
+        # Restrict motion check area to house and immediate surrounding area
+        ch, cw = crop.shape[:2]
+        y1, y2 = int(ch * ROI_Y_MIN), int(ch * ROI_Y_MAX)
+        x1, x2 = int(cw * ROI_X_MIN), int(cw * ROI_X_MAX)
+        return crop[y1:y2, x1:x2]
 
     prev_crop = get_front_crop(prev_frame)
     prev_gray = cv2.cvtColor(prev_crop, cv2.COLOR_BGR2GRAY)

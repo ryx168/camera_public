@@ -28,6 +28,12 @@ jobs:
           python -c "import cv2; print(cv2.__version__); print('HOGDescriptor present:', hasattr(cv2, 'HOGDescriptor'))"
 
       - name: Run motion check
+        env:
+          CHECK_AREA: "house_around"
+          ROI_Y_MIN: "0.20"
+          ROI_Y_MAX: "1.0"
+          ROI_X_MIN: "0.0"
+          ROI_X_MAX: "1.0"
         run: python check_recent_motion.py
         
       - name: Send Report Email
