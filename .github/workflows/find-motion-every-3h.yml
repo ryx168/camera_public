@@ -31,7 +31,7 @@ jobs:
         env:
           CHECK_AREA: "house_around"
           TARGET_OBJECT: "person"
-          ROI_Y_MIN: "0.20"
+          ROI_Y_MIN: "0.50"
           ROI_Y_MAX: "1.0"
           ROI_X_MIN: "0.0"
           ROI_X_MAX: "1.0"
