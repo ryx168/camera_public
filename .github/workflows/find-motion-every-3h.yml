@@ -48,8 +48,8 @@ jobs:
           ROI_X_MAX: "1.0"
           MOTION_THRESHOLD: "15000"
         run: python check_recent_motion.py
-        
-      - name: Send Report Email
+
+      - name: Send Report Email with Detection Screenshots
         if: always()
         env:
           SMTP_SERVER: ${{ secrets.SMTP_SERVER || secrets.SMTP_HOST }}
@@ -57,33 +57,15 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME || secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || secrets.SMTP_PASS }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
-        run: |
-          python -c "
-          import os, smtplib
-          from email.mime.text import MIMEText
+          SMTP_TO: 'harry@superesolutions.com'
+        run: python send_motion_email.py
 
-          body = 'No report file generated.'
-          if os.path.exists('report.txt'):
-              with open('report.txt', 'r', encoding='utf-8') as f:
-                  body = f.read()
-
-          msg = MIMEText(body, 'plain', 'utf-8')
-          msg['Subject'] = 'Twitch Motion Check Report'
-          msg['From'] = os.environ.get('SMTP_FROM') or 'harry@superesolutions.com'
-          msg['To'] = 'harry@superesolutions.com'
-
-          smtp_host = os.environ.get('SMTP_SERVER') or 'smtp.postmarkapp.com'
-          smtp_port = int(os.environ.get('SMTP_PORT') or 587)
-          smtp_user = os.environ.get('SMTP_USERNAME') or '8f23463b-5db0-4bfb-9adc-fa13016656d2'
-          smtp_pass = os.environ.get('SMTP_PASSWORD') or '8f23463b-5db0-4bfb-9adc-fa13016656d2'
-
-          print(f'Connecting to {smtp_host}:{smtp_port}...')
-          with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-              server.starttls()
-              server.login(smtp_user, smtp_pass)
-              server.send_message(msg)
-          print('Report email delivered successfully!')
-          "
-
-
-
+      - name: Upload Motion Snapshots and Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: motion-check-artifacts
+          path: |
+            snapshot_*.jpg
+            report.txt
+          if-no-files-found: ignore
