@@ -22,10 +22,12 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update && sudo apt-get install -y tesseract-ocr
           python -m pip install --upgrade pip
           pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless || true
-          pip install --no-cache-dir yt-dlp opencv-contrib-python-headless
-          python -c "import cv2; print(cv2.__version__); print('HOGDescriptor present:', hasattr(cv2, 'HOGDescriptor'))"
+          pip install --no-cache-dir yt-dlp opencv-contrib-python-headless pytesseract
+          python -c "import cv2, pytesseract; print('OpenCV:', cv2.__version__); print('HOGDescriptor present:', hasattr(cv2, 'HOGDescriptor')); print('Tesseract:', pytesseract.get_tesseract_version())"
+
 
       - name: Run motion check (House - Cam 2 Bottom 80%)
         env:
