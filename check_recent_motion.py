@@ -138,15 +138,16 @@ def main():
     print(f"Got {len(stream_urls)} valid streams. Starting motion & person detection...")
 
     # Check Area / Region of Interest (ROI) configuration
-    ROI_Y_MIN = float(os.environ.get('ROI_Y_MIN', '0.20'))
+    ROI_Y_MIN = float(os.environ.get('ROI_Y_MIN', '0.25'))
     ROI_Y_MAX = float(os.environ.get('ROI_Y_MAX', '1.0'))
     ROI_X_MIN = float(os.environ.get('ROI_X_MIN', '0.0'))
     ROI_X_MAX = float(os.environ.get('ROI_X_MAX', '1.0'))
 
     video_scores = []
-    MOTION_THRESHOLD = int(os.environ.get('MOTION_THRESHOLD', '9500'))
-    MIN_PERSON_HEIGHT = int(os.environ.get('MIN_PERSON_HEIGHT', '65'))  # Minimum bounding box height on 800px crop
-    MIN_CONFIDENCE = float(os.environ.get('MIN_CONFIDENCE', '0.35'))
+    DIFF_THRESHOLD = int(os.environ.get('DIFF_THRESHOLD', '35'))        # Pixel difference threshold (higher = less sensitive to noise)
+    MOTION_THRESHOLD = int(os.environ.get('MOTION_THRESHOLD', '25000')) # Minimum motion pixels (higher = less sensitive)
+    MIN_PERSON_HEIGHT = int(os.environ.get('MIN_PERSON_HEIGHT', '110')) # Minimum bounding box height on 800px crop (higher = ignore distant)
+    MIN_CONFIDENCE = float(os.environ.get('MIN_CONFIDENCE', '0.70'))    # HOG confidence margin (higher = ignore false positives)
 
     def get_crop_and_roi(frame):
         h, w = frame.shape[:2]
@@ -207,7 +208,7 @@ def main():
             gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
             
             diff = cv2.absdiff(prev_gray, gray)
-            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            _, thresh = cv2.threshold(diff, DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
             
             motion = cv2.countNonZero(thresh)
             if motion > max_motion:
@@ -218,7 +219,7 @@ def main():
             if motion > MOTION_THRESHOLD:
                 if TARGET_OBJECT == 'person' and hog is not None:
                     crop_resized = cv2.resize(crop, (800, int(crop.shape[0] * (800 / crop.shape[1]))))
-                    rects, weights = hog.detectMultiScale(crop_resized, winStride=(8, 8), padding=(8, 8), scale=1.05)
+                    rects, weights = hog.detectMultiScale(crop_resized, winStride=(8, 8), padding=(8, 8), scale=1.08)
                     
                     for (rx, ry, rw, rh), weight in zip(rects, weights):
                         # Filter out small/distant detections (far on street/background)

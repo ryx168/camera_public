@@ -8,3 +8,16 @@ Rank 2: https://www.twitch.tv/videos/2833001544 at 15.6s (Score: 64552)
 Rank 3: https://www.twitch.tv/videos/2833001077 at 15.6s (Score: 64552)
 Rank 4: https://www.twitch.tv/videos/2833004002 at 7.0s (Score: 64513)
 Rank 5: https://www.twitch.tv/videos/2833180115 at 21.6s (Score: 55025)
+=== Report for house_around (person) ===
+OBJECT FOUND!
+
+Top video: https://www.twitch.tv/videos/2834414935 at 2.5s
+Motion Score: 72971 pixels (Person height: 181px, conf: 0.75)
+Screenshot: snapshot_house_around.jpg
+
+Other top candidates:
+Rank 2: https://www.twitch.tv/videos/2834414562 at 8.1s (Score: 72937)
+Rank 3: https://www.twitch.tv/videos/2834414135 at 8.1s (Score: 72937)
+Rank 4: https://www.twitch.tv/videos/2834412431 at 11.1s (Score: 72922)
+Rank 5: https://www.twitch.tv/videos/2834412189 at 11.1s (Score: 72922)
+

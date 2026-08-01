@@ -31,10 +31,14 @@ jobs:
         env:
           CHECK_AREA: "house_around"
           TARGET_OBJECT: "person"
-          ROI_Y_MIN: "0.0"
+          ROI_Y_MIN: "0.25"
           ROI_Y_MAX: "1.0"
           ROI_X_MIN: "0.0"
           ROI_X_MAX: "1.0"
+          MOTION_THRESHOLD: "25000"
+          MIN_CONFIDENCE: "0.70"
+          MIN_PERSON_HEIGHT: "110"
+          DIFF_THRESHOLD: "35"
         run: python check_recent_motion.py
         
       - name: Run motion check (Garage Car)
@@ -46,7 +50,8 @@ jobs:
           ROI_Y_MAX: "1.0"
           ROI_X_MIN: "0.0"
           ROI_X_MAX: "1.0"
-          MOTION_THRESHOLD: "15000"
+          MOTION_THRESHOLD: "35000"
+          DIFF_THRESHOLD: "35"
         run: python check_recent_motion.py
 
       - name: Send Report Email with Detection Screenshots
