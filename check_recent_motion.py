@@ -2,6 +2,7 @@
 import json
 import subprocess
 import cv2
+import numpy as np
 import os
 import datetime
 from datetime import timezone
@@ -15,7 +16,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
-CHECK_AREA = os.environ.get('CHECK_AREA', 'house_around')
+CHECK_AREA = os.environ.get('CHECK_AREA', 'house_around').lower().strip()
 TARGET_OBJECT = os.environ.get('TARGET_OBJECT', 'person')
 
 # Initialize HOG people detector safely
@@ -27,6 +28,62 @@ except AttributeError:
     hog = None
 
 
+def get_camera_bounds(frame, area_name):
+    """
+    Returns (cam_x1, cam_y1, cam_x2, cam_y2) for the requested camera zone.
+    5-Camera Grid Layout (e.g. 1280x480):
+      Top row:
+        - Camera 1 ("office"):   0 .. w//3, 0 .. h//2          (Top-Left)
+        - Camera 2 ("house_around", "front"): w//3 .. 2*w//3, 0 .. h//2  (Top-Middle)
+        - Camera 3 ("garage", "kitchen"):     2*w//3 .. w, 0 .. h//2     (Top-Right)
+      Bottom row:
+        - Camera 4 ("balcony"):  0 .. w//2, h//2 .. h          (Bottom-Left)
+        - Camera 5 ("backyard"): w//2 .. w, h//2 .. h          (Bottom-Right)
+    """
+    h, w = frame.shape[:2]
+    area = area_name.lower().strip()
+    
+    if area in ['office', 'cam1']:
+        return 0, 0, w // 3, h // 2
+    elif area in ['house_around', 'front', 'cam2', 'door', 'house']:
+        # Camera 2: Top Middle (Front porch / door)
+        return w // 3, 0, (w // 3) * 2, h // 2
+    elif area in ['garage', 'kitchen', 'cam3', 'car', 'driveway']:
+        # Camera 3: Top Right (Kitchen / Driveway / Garage)
+        return (w // 3) * 2, 0, w, h // 2
+    elif area in ['balcony', 'cam4']:
+        # Camera 4: Bottom Left (Balcony)
+        return 0, h // 2, w // 2, h
+    elif area in ['backyard', 'cam5', 'yard']:
+        # Camera 5: Bottom Right (Backyard)
+        return w // 2, h // 2, w, h
+    else:
+        # Default fallback: Camera 2
+        return w // 3, 0, (w // 3) * 2, h // 2
+
+
+def is_multicam_grid(frame):
+    """
+    Detects if the video frame is a 5-camera multi-camera grid layout or a single fullscreen camera.
+    Returns True if 5-camera grid, False if single camera.
+    """
+    h, w = frame.shape[:2]
+    if w < 600 or h < 300:
+        return False
+        
+    mid_y = h // 2
+    w3 = w // 3
+    w3_2 = (w // 3) * 2
+    
+    # In single camera, the image is continuous across (w//3, 2*w//3, h//2).
+    # In 5-camera grid, adjacent cameras have distinct exposure, scene content, and sharp step differences.
+    diff_v1 = float(np.mean(cv2.absdiff(frame[20:mid_y-20, w3-8:w3-2], frame[20:mid_y-20, w3+2:w3+8])))
+    diff_v2 = float(np.mean(cv2.absdiff(frame[20:mid_y-20, w3_2-8:w3_2-2], frame[20:mid_y-20, w3_2+2:w3_2+8])))
+    diff_h = float(np.mean(cv2.absdiff(frame[mid_y-8:mid_y-2, 40:w-40], frame[mid_y+2:mid_y+8, 40:w-40])))
+    
+    return (diff_v1 > 18.0 or diff_v2 > 18.0) and diff_h > 16.0
+
+
 def annotate_and_save_snapshot(frame, crop_roi, bbox, area_name, target_obj, vid, url, timestamp_sec, score, p_height, p_weight, output_path):
     """Draw HUD overlay and detection boxes, and save JPEG screenshot."""
     annotated = frame.copy()
@@ -36,7 +93,6 @@ def annotate_and_save_snapshot(frame, crop_roi, bbox, area_name, target_obj, vid
     if crop_roi is not None:
         rx1, ry1, rx2, ry2 = crop_roi
         cv2.rectangle(annotated, (rx1, ry1), (rx2, ry2), (0, 215, 255), 2)
-        # Add small corner tag for ROI
         tag_text = f"ROI: {area_name.upper()}"
         cv2.putText(annotated, tag_text, (rx1 + 4, max(ry1 - 6, 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 215, 255), 1, cv2.LINE_AA)
         
@@ -45,7 +101,6 @@ def annotate_and_save_snapshot(frame, crop_roi, bbox, area_name, target_obj, vid
             bx, by, bw, bh = bbox
             px1, py1 = rx1 + bx, ry1 + by
             px2, py2 = px1 + bw, py1 + bh
-            # Clip to frame
             px1, py1 = max(0, px1), max(0, py1)
             px2, py2 = min(w - 1, px2), min(h - 1, py2)
             cv2.rectangle(annotated, (px1, py1), (px2, py2), (0, 0, 255), 2)
@@ -135,33 +190,31 @@ def main():
             if (i+1) % 50 == 0:
                 print(f"Fetched {i+1} URLs...")
 
-    print(f"Got {len(stream_urls)} valid streams. Starting motion & person detection...")
+    print(f"Got {len(stream_urls)} valid streams. Starting motion & person detection for area '{CHECK_AREA}'...")
 
-    # Check Area / Region of Interest (ROI) configuration
-    ROI_Y_MIN = float(os.environ.get('ROI_Y_MIN', '0.25'))
+    # Region of Interest (ROI) within selected camera bounds
+    # For Camera 2 (house_around/front), default to bottom 80% area (ROI_Y_MIN = 0.20) to exclude street tree
+    default_roi_y_min = '0.20' if CHECK_AREA in ['house_around', 'front'] else '0.0'
+    ROI_Y_MIN = float(os.environ.get('ROI_Y_MIN', default_roi_y_min))
     ROI_Y_MAX = float(os.environ.get('ROI_Y_MAX', '1.0'))
     ROI_X_MIN = float(os.environ.get('ROI_X_MIN', '0.0'))
     ROI_X_MAX = float(os.environ.get('ROI_X_MAX', '1.0'))
 
     video_scores = []
-    DIFF_THRESHOLD = int(os.environ.get('DIFF_THRESHOLD', '35'))        # Pixel difference threshold (higher = less sensitive to noise)
-    MOTION_THRESHOLD = int(os.environ.get('MOTION_THRESHOLD', '25000')) # Minimum motion pixels (higher = less sensitive)
-    MIN_PERSON_HEIGHT = int(os.environ.get('MIN_PERSON_HEIGHT', '110')) # Minimum bounding box height on 800px crop (higher = ignore distant)
-    MIN_CONFIDENCE = float(os.environ.get('MIN_CONFIDENCE', '0.70'))    # HOG confidence margin (higher = ignore false positives)
+    DIFF_THRESHOLD = int(os.environ.get('DIFF_THRESHOLD', '35'))        # Pixel difference threshold
+    MOTION_THRESHOLD = int(os.environ.get('MOTION_THRESHOLD', '25000')) # Minimum motion pixels
+    MIN_PERSON_HEIGHT = int(os.environ.get('MIN_PERSON_HEIGHT', '110')) # Minimum bounding box height
+    MIN_CONFIDENCE = float(os.environ.get('MIN_CONFIDENCE', '0.70'))    # HOG confidence margin
 
     def get_crop_and_roi(frame):
-        h, w = frame.shape[:2]
-        if w >= 1280:
-            base_x1, base_y1, base_x2, base_y2 = 426, 0, 853, 240
-        else:
-            base_x1, base_y1, base_x2, base_y2 = w // 3, 0, (w // 3) * 2, h // 2
-            
-        ch = base_y2 - base_y1
-        cw = base_x2 - base_x1
-        y1 = base_y1 + int(ch * ROI_Y_MIN)
-        y2 = base_y1 + int(ch * ROI_Y_MAX)
-        x1 = base_x1 + int(cw * ROI_X_MIN)
-        x2 = base_x1 + int(cw * ROI_X_MAX)
+        bx1, by1, bx2, by2 = get_camera_bounds(frame, CHECK_AREA)
+        cw = bx2 - bx1
+        ch = by2 - by1
+        
+        y1 = by1 + int(ch * ROI_Y_MIN)
+        y2 = by1 + int(ch * ROI_Y_MAX)
+        x1 = bx1 + int(cw * ROI_X_MIN)
+        x2 = bx1 + int(cw * ROI_X_MAX)
         
         crop = frame[y1:y2, x1:x2]
         roi_coords = (x1, y1, x2, y2)
@@ -174,6 +227,12 @@ def main():
         cap = cv2.VideoCapture(stream_url)
         ret, prev_frame = cap.read()
         if not ret: continue
+
+        # Verify multi-camera grid layout (skip single-camera broadcasts)
+        if not is_multicam_grid(prev_frame):
+            print(f"Skipping {vid}: Single camera broadcast detected (not 5-camera layout).")
+            cap.release()
+            continue
         
         prev_crop, _ = get_crop_and_roi(prev_frame)
         if prev_crop.size == 0:
@@ -222,7 +281,7 @@ def main():
                     rects, weights = hog.detectMultiScale(crop_resized, winStride=(8, 8), padding=(8, 8), scale=1.08)
                     
                     for (rx, ry, rw, rh), weight in zip(rects, weights):
-                        # Filter out small/distant detections (far on street/background)
+                        # Filter out small/distant detections
                         if weight >= MIN_CONFIDENCE and rh >= MIN_PERSON_HEIGHT:
                             scale_x = crop.shape[1] / 800.0
                             scale_y = crop.shape[0] / float(crop_resized.shape[0])

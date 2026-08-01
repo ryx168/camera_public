@@ -1,31 +1,56 @@
 #!/usr/bin/env python3
 """
 test_motion_pipeline.py
-Test script to verify frame annotation, report parsing, HTML generation, and MIME image attachment.
+Test script to verify camera layout bounds, multi-camera grid detection,
+frame annotation, report parsing, HTML generation, and MIME image attachment.
 """
 
 import os
 import sys
 import numpy as np
 import cv2
-from check_recent_motion import annotate_and_save_snapshot
+from check_recent_motion import annotate_and_save_snapshot, get_camera_bounds, is_multicam_grid
 from send_motion_email import parse_report_file, build_email_content, send_email
 
 def test_pipeline():
-    print("1. Creating synthetic camera test frames...")
-    # Create synthetic 1280x480 frame
-    frame = np.zeros((480, 1280, 3), dtype=np.uint8)
-    # Add dummy visual textures
-    cv2.rectangle(frame, (0, 0), (426, 240), (40, 40, 40), -1)      # Office
-    cv2.rectangle(frame, (426, 0), (853, 240), (70, 70, 70), -1)    # Front
-    cv2.rectangle(frame, (853, 0), (1280, 240), (40, 40, 40), -1)   # Kitchen
-    cv2.putText(frame, "Front Camera", (500, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    print("1. Testing camera layout bounds...")
+    w, h = 1280, 480
+    
+    # House / Front should be Camera 2 (Top-Middle: 426..853, 0..240)
+    cam2_bounds = get_camera_bounds(np.zeros((h, w, 3), dtype=np.uint8), "house_around")
+    assert cam2_bounds == (426, 0, 852, 240), f"Unexpected bounds for house_around: {cam2_bounds}"
+    print(f"   ✅ house_around bounds: {cam2_bounds} (Camera 2 - Top Middle)")
 
+    # Garage / Kitchen should be Camera 3 (Top-Right: 853..1280, 0..240)
+    cam3_bounds = get_camera_bounds(np.zeros((h, w, 3), dtype=np.uint8), "garage")
+    assert cam3_bounds == (852, 0, 1280, 240), f"Unexpected bounds for garage: {cam3_bounds}"
+    print(f"   ✅ garage bounds: {cam3_bounds} (Camera 3 - Top Right)")
+
+    print("\n2. Testing multi-camera grid vs single-camera detector...")
+    # Create synthetic 5-camera grid frame with different cameras
+    grid_frame = np.zeros((480, 1280, 3), dtype=np.uint8)
+    grid_frame[0:240, 0:426] = (30, 40, 50)         # Cam 1 Office
+    grid_frame[0:240, 426:853] = (180, 190, 200)    # Cam 2 Front porch
+    grid_frame[0:240, 853:1280] = (80, 120, 60)     # Cam 3 Garage / Driveway
+    grid_frame[240:480, 0:640] = (10, 80, 150)      # Cam 4 Balcony
+    grid_frame[240:480, 640:1280] = (40, 180, 50)   # Cam 5 Backyard
+    
+    assert is_multicam_grid(grid_frame) is True, "Expected 5-camera grid to be detected as True"
+    print("   ✅ 5-camera grid correctly recognized.")
+
+    # Create synthetic single camera frame (smooth gradient across frame, no camera boundaries)
+    single_cam_frame = np.zeros((480, 1280, 3), dtype=np.uint8)
+    for y in range(480):
+        single_cam_frame[y, :] = int((y / 480.0) * 150)
+    assert is_multicam_grid(single_cam_frame) is False, "Expected single camera frame to be detected as False"
+    print("   ✅ Single camera broadcast correctly detected and filtered out.")
+
+    print("\n3. Creating synthetic camera test snapshots...")
     # Generate House snapshot
-    house_roi = (426, 0, 853, 240)
-    house_bbox = (150, 40, 80, 160)
+    house_roi = (426, 48, 852, 240)  # Bottom 80% of Camera 2
+    house_bbox = (150, 40, 80, 140)
     annotate_and_save_snapshot(
-        frame=frame,
+        frame=grid_frame,
         crop_roi=house_roi,
         bbox=house_bbox,
         area_name="house_around",
@@ -41,10 +66,10 @@ def test_pipeline():
     assert os.path.exists("snapshot_house_around.jpg"), "House snapshot was not created!"
     print("   ✅ Generated snapshot_house_around.jpg successfully.")
 
-    # Generate Garage snapshot
-    garage_roi = (426, 120, 853, 240)
+    # Generate Garage snapshot (in Camera 3)
+    garage_roi = (852, 48, 1280, 240)
     annotate_and_save_snapshot(
-        frame=frame,
+        frame=grid_frame,
         crop_roi=garage_roi,
         bbox=None,
         area_name="garage",
@@ -60,7 +85,7 @@ def test_pipeline():
     assert os.path.exists("snapshot_garage.jpg"), "Garage snapshot was not created!"
     print("   ✅ Generated snapshot_garage.jpg successfully.")
 
-    print("2. Generating test report.txt...")
+    print("\n4. Generating test report.txt...")
     test_report_content = """=== Report for house_around (person) ===
 OBJECT FOUND!
 
@@ -85,7 +110,7 @@ Rank 2: https://www.twitch.tv/videos/2833180115 at 21.6s (Score: 16500)
     with open("test_report.txt", "w", encoding="utf-8") as f:
         f.write(test_report_content)
 
-    print("3. Testing report parsing and email formatting...")
+    print("\n5. Testing report parsing and email formatting...")
     sections, raw_text = parse_report_file("test_report.txt")
     assert len(sections) == 2, f"Expected 2 sections, got {len(sections)}"
     assert sections[0]["area_name"] == "house_around"
@@ -102,12 +127,12 @@ Rank 2: https://www.twitch.tv/videos/2833180115 at 21.6s (Score: 16500)
     assert "https://www.twitch.tv/videos/2833002021" in html_body, "HTML body must contain Twitch URL"
     print("   ✅ HTML Email body contains all screenshots, links, and timestamps.")
 
-    print("4. Testing send_email dry run with attachments...")
+    print("\n6. Testing send_email dry run with attachments...")
     os.environ["REPORT_PATH"] = "test_report.txt"
     send_email(dry_run=True)
     print("   ✅ send_email dry run passed with full MIME image packaging.")
 
-    print("5. Testing All-Clear scenario (no motion)...")
+    print("\n7. Testing All-Clear scenario (no motion)...")
     with open("test_clear_report.txt", "w", encoding="utf-8") as f:
         f.write("=== Report for house_around (person) ===\nno find\n\n=== Report for garage (car) ===\nno find\n")
     clear_sections, clear_raw = parse_report_file("test_clear_report.txt")
