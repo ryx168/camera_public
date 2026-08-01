@@ -46,7 +46,11 @@ for v in videos:
         recent_videos.append(v)
 
 if not recent_videos:
-    recent_videos = videos[:300]
+    print("No videos found in the last 3 hours. Exiting.")
+    with open("report.txt", "a") as f:
+        f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
+        f.write("no videos in the last 3 hours\n\n")
+    exit(0)
 
 print(f"Found {len(recent_videos)} videos in the last 3 hours")
 
