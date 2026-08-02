@@ -435,54 +435,63 @@ def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, u
     saved = []
 
     for idx, item in enumerate(three_frames_data):
-        frame = item['frame'].copy()
-        h, w = frame.shape[:2]
-        crop_roi = item['roi']
-        bbox = item['bbox']
-        t_sec = item['time']
         phase = item.get('phase', f'FRAME {idx+1}')
-        conf = item.get('weight', 1.0)
-        cx, cy = item.get('center', (0, 0))
-        motion_px = item.get('motion', 0)
-        cam_name = item.get('cam_name', area_name)
-        cam_count = item.get('cam_count', 5)
+        try:
+            frame = item['frame'].copy()
+            h, w = frame.shape[:2]
+            crop_roi = item['roi']
+            bbox = item['bbox']
+            t_sec = item['time']
+            conf = item.get('weight', 1.0)
+            cx, cy = item.get('center', (0, 0))
+            motion_px = item.get('motion', 0)
+            cam_name = item.get('cam_name', area_name)
+            cam_count = item.get('cam_count', 5)
 
-        # 1. Highlight ROI
-        if crop_roi is not None:
-            rx1, ry1, rx2, ry2 = crop_roi
-            cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (0, 215, 255), 2)
-            cv2.putText(frame, f"CAMERA: {cam_name.upper()} | ROI", (rx1 + 4, max(ry1 - 6, 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 215, 255), 1, cv2.LINE_AA)
+            # 1. Highlight ROI
+            if crop_roi is not None:
+                rx1, ry1, rx2, ry2 = crop_roi
+                cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (0, 215, 255), 2)
+                cv2.putText(frame, f"CAMERA: {cam_name.upper()} | ROI", (rx1 + 4, max(ry1 - 6, 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 215, 255), 1, cv2.LINE_AA)
 
-            # 2. Highlight moving object bounding box
-            if bbox is not None:
-                bx, by, bw, bh = bbox
-                px1, py1 = rx1 + bx, ry1 + by
-                px2, py2 = px1 + bw, py1 + bh
-                px1, py1 = max(0, px1), max(0, py1)
-                px2, py2 = min(w - 1, px2), min(h - 1, py2)
-                cv2.rectangle(frame, (px1, py1), (px2, py2), (0, 0, 255), 2)
-                label_txt = f"{target_obj.capitalize()} ({conf:.2f}) Pos:({int(cx)},{int(cy)})"
-                cv2.putText(frame, label_txt, (px1, max(py1 - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
+                # 2. Highlight moving object bounding box
+                if bbox is not None:
+                    bx, by, bw, bh = bbox
+                    px1, py1 = rx1 + bx, ry1 + by
+                    px2, py2 = px1 + bw, py1 + bh
+                    px1, py1 = max(0, px1), max(0, py1)
+                    px2, py2 = min(w - 1, px2), min(h - 1, py2)
+                    cv2.rectangle(frame, (px1, py1), (px2, py2), (0, 0, 255), 2)
+                    label_txt = f"{target_obj.capitalize()} ({conf:.2f}) Pos:({int(cx)},{int(cy)})"
+                    cv2.putText(frame, label_txt, (px1, max(py1 - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
 
-        # 3. HUD header bar (2 lines) on this individual frame
-        header_h = 54
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (w, header_h), (12, 12, 22), -1)
-        cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
-        cv2.line(frame, (0, header_h), (w, header_h), (0, 160, 255), 2)
+            # 3. HUD header bar (2 lines) on this individual frame
+            header_h = 54
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w, header_h), (12, 12, 22), -1)
+            cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
+            cv2.line(frame, (0, header_h), (w, header_h), (0, 160, 255), 2)
 
-        line1 = f"[{phase}] {cam_name.upper()} | Target: {target_obj.upper()} | Layout: {cam_count}-Cam | Frame {idx+1}/3"
-        cv2.putText(frame, line1, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 235, 255), 1, cv2.LINE_AA)
+            line1 = f"[{phase}] {cam_name.upper()} | Target: {target_obj.upper()} | Layout: {cam_count}-Cam | Frame {idx+1}/3"
+            cv2.putText(frame, line1, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 235, 255), 1, cv2.LINE_AA)
 
-        line2 = f"VOD {vid} @ {t_sec:.1f}s | Motion: {motion_px:,}px | Total Movement: {total_movement_px:.1f}px | {now_utc_str}"
-        cv2.putText(frame, line2, (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
+            line2 = f"VOD {vid} @ {t_sec:.1f}s | Motion: {motion_px:,}px | Total Movement: {total_movement_px:.1f}px | {now_utc_str}"
+            cv2.putText(frame, line2, (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
 
-        suffix = phase_suffix_map.get(phase, f"f{idx+1}")
-        out_path = f"{output_prefix}_{suffix}.jpg"
-        cv2.imwrite(out_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        saved.append({'path': out_path, 'time': t_sec, 'phase': phase})
-        print(f"Saved snapshot [{phase}] at {t_sec:.1f}s to: {out_path}")
+            suffix = phase_suffix_map.get(phase, f"f{idx+1}")
+            out_path = f"{output_prefix}_{suffix}.jpg"
+            ok = cv2.imwrite(out_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            if ok and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                saved.append({'path': out_path, 'time': t_sec, 'phase': phase})
+                print(f"Saved snapshot [{phase}] at {t_sec:.1f}s to: {out_path} ({os.path.getsize(out_path)} bytes)")
+            else:
+                print(f"WARNING: cv2.imwrite reported failure for [{phase}] frame -> {out_path}")
+        except Exception as e:
+            # Never let one bad frame wipe out the other verified screenshots
+            print(f"WARNING: Failed to annotate/save [{phase}] frame ({idx+1}/3): {e}")
+            continue
 
+    print(f"annotate_and_save_snapshots: {len(saved)}/3 screenshots saved successfully for prefix '{output_prefix}'")
     return saved
 
 
@@ -859,15 +868,21 @@ def main():
 
     if verified_video_events:
         top_event = verified_video_events[0]
-        saved_snapshots = annotate_and_save_snapshots(
-            three_frames_data=top_event['three_frames'],
-            area_name=CHECK_AREA,
-            target_obj=TARGET_OBJECT,
-            vid=top_event['vid'],
-            url=top_event['url'],
-            total_movement_px=top_event['movement'],
-            output_prefix=snapshot_prefix
-        )
+        try:
+            saved_snapshots = annotate_and_save_snapshots(
+                three_frames_data=top_event['three_frames'],
+                area_name=CHECK_AREA,
+                target_obj=TARGET_OBJECT,
+                vid=top_event['vid'],
+                url=top_event['url'],
+                total_movement_px=top_event['movement'],
+                output_prefix=snapshot_prefix
+            )
+        except Exception as e:
+            # Never let a snapshot-rendering failure prevent report.txt from being
+            # written - the email should still report the detection, just without images.
+            print(f"ERROR: annotate_and_save_snapshots failed entirely: {e}")
+            saved_snapshots = []
 
     with open("report.txt", "a", encoding="utf-8") as f:
         f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
