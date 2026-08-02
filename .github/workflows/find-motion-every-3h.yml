@@ -12,6 +12,7 @@ jobs:
     timeout-minutes: 60
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      TZ: 'America/Los_Angeles'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

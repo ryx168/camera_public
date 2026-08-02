@@ -17,6 +17,24 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 
+try:
+    from zoneinfo import ZoneInfo
+    PST_TZ = ZoneInfo("America/Los_Angeles")
+except Exception:
+    PST_TZ = datetime.timezone(datetime.timedelta(hours=-7), name="PDT")
+
+
+def get_pst_time():
+    """Get current datetime in US Pacific timezone (PST/PDT)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        try:
+            return datetime.datetime.now(PST_TZ)
+        except Exception:
+            return datetime.datetime.now().astimezone()
+
 # Ensure UTF-8 output for console logging across Windows/Linux
 if hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -134,22 +152,24 @@ def extract_screenshots(text, area_name):
 
 def build_email_content(sections, raw_text):
     """Build dynamic subject, plain-text body, and HTML body."""
+    now_pst = get_pst_time()
+    tz_abbr = now_pst.strftime("%Z") or "PST"
+    now_pst_str = now_pst.strftime(f"%Y-%m-%d %I:%M %p {tz_abbr}")
     now_utc = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    now_local = datetime.datetime.now().strftime("%Y-%m-%d %I:%M %p")
     
     detected_areas = [s["area_name"] for s in sections if s["detected"]]
     has_any_detection = len(detected_areas) > 0
 
     if has_any_detection:
-        subject = f"🚨 [MOTION DETECTED] Twitch Camera Alert ({', '.join(detected_areas)}) - {now_utc}"
+        subject = f"🚨 [MOTION DETECTED] Twitch Camera Alert ({', '.join(detected_areas)}) - {now_pst_str}"
     else:
-        subject = f"✅ [All Clear] Twitch Motion Check Report - {now_utc}"
+        subject = f"✅ [All Clear] Twitch Motion Check Report - {now_pst_str}"
 
     # Plain text version
     plain_body = f"""====================================================
 TWITCH 3-HOUR MOTION CHECK REPORT
 ====================================================
-Check Time: {now_utc} ({now_local} Local)
+Check Time: {now_pst_str} ({now_utc})
 Overall Status: {'🚨 MOTION / OBJECT DETECTED' if has_any_detection else '✅ ALL CLEAR - NO MOTION DETECTED'}
 Detected Areas: {', '.join(detected_areas) if detected_areas else 'None'}
 ====================================================
@@ -290,8 +310,8 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
         <div style="background-color: #f1f5f9; padding: 12px 20px; font-size: 13px; color: #475569; border-bottom: 1px solid #e2e8f0;">
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
-                    <td><b>Time (UTC):</b> {now_utc}</td>
-                    <td style="text-align: right;"><b>Local:</b> {now_local}</td>
+                    <td><b>Time (PST/PDT):</b> {now_pst_str}</td>
+                    <td style="text-align: right;"><b>UTC:</b> {now_utc}</td>
                 </tr>
             </table>
         </div>
