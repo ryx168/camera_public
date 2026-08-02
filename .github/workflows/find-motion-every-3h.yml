@@ -9,6 +9,7 @@ jobs:
   check-motion:
     runs-on: ubuntu-latest
     environment: camera-access
+    timeout-minutes: 60
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
     steps:
@@ -22,14 +23,22 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y tesseract-ocr
+          sudo apt-get update && sudo apt-get install -y tesseract-ocr ffmpeg
           python -m pip install --upgrade pip
           pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless || true
           pip install --no-cache-dir yt-dlp opencv-contrib-python-headless pytesseract
           python -c "import cv2, pytesseract; print('OpenCV:', cv2.__version__); print('HOGDescriptor present:', hasattr(cv2, 'HOGDescriptor')); print('Tesseract:', pytesseract.get_tesseract_version())"
 
+      - name: Restore shared temp_vods cache
+        uses: actions/cache@v4
+        with:
+          path: temp_vods/
+          key: temp-vods-${{ github.run_id }}
+          restore-keys: |
+            temp-vods-
 
       - name: Run motion check (House - Cam 2 Bottom 80%)
+        timeout-minutes: 25
         env:
           CHECK_AREA: "house_around"
           TARGET_OBJECT: "person"
@@ -45,6 +54,7 @@ jobs:
         
       - name: Run motion check (Garage - Cam 3)
         if: always()
+        timeout-minutes: 25
         env:
           CHECK_AREA: "garage"
           TARGET_OBJECT: "car"
@@ -76,3 +86,7 @@ jobs:
             snapshot_*.jpg
             report.txt
           if-no-files-found: ignore
+
+      - name: Cleanup temp VODs
+        if: always()
+        run: rm -rf temp_vods/

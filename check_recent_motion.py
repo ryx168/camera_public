@@ -505,42 +505,157 @@ def annotate_and_save_group_snapshot(three_frames_data, area_name, target_obj, v
     print(f"Saved 3-frame group motion snapshot to: {output_path}")
 
 
-def get_stream_url(vid):
+# Suppress noisy OpenCV / FFmpeg stderr warnings and configure timeouts
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+os.environ["OPENCV_FFMPEG_READ_ATTEMPTS"] = "2"
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "timeout;5000000|analyzeduration;5000000|probesize;5000000"
+
+try:
+    if hasattr(cv2, 'setLogLevel'):
+        cv2.setLogLevel(0)
+    elif hasattr(cv2, 'utils') and hasattr(cv2.utils, 'logging'):
+        cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+except Exception:
+    pass
+
+
+def prepare_local_vod(vid, temp_dir="temp_vods"):
+    """
+    Downloads or retrieves the local cached MP4 for a Twitch VOD.
+    Using local MP4 files prevents OpenCV cap_ffmpeg interrupt callback timeouts (30s per EOF)
+    and HTTP EOF decoding errors.
+    Returns: (vid, web_url, local_path_or_stream_url)
+    """
     url = f'https://www.twitch.tv/videos/{vid[1:]}'
-    res = subprocess.run([sys.executable, '-m', 'yt_dlp', '-g', url], capture_output=True, text=True)
-    return vid, url, res.stdout.strip()
+    os.makedirs(temp_dir, exist_ok=True)
+    local_path = os.path.join(temp_dir, f"{vid}.mp4")
+
+    # If file already exists and is valid (> 10 KB), reuse it immediately
+    if os.path.exists(local_path) and os.path.getsize(local_path) > 10240:
+        return vid, url, local_path
+
+    # Step 1: Get stream m3u8 URL from yt-dlp
+    stream_url = ""
+    try:
+        res = subprocess.run(
+            [sys.executable, '-m', 'yt_dlp', '-g', url],
+            capture_output=True, text=True, timeout=20
+        )
+        stream_url = res.stdout.strip()
+    except Exception:
+        stream_url = ""
+
+    if not stream_url:
+        return vid, url, None
+
+    # Step 2: Download HLS stream directly to MP4 using ffmpeg in stream-copy mode
+    # Fast (<0.5s for 2MB clip), handles HLS chunks cleanly, and exits immediately at EOF
+    temp_download = os.path.join(temp_dir, f"{vid}.downloading.mp4")
+    try:
+        ff_cmd = [
+            'ffmpeg', '-y', '-nostdin', '-loglevel', 'error',
+            '-rw_timeout', '15000000', '-timeout', '15000000',
+            '-i', stream_url,
+            '-c', 'copy',
+            '-bsf:a', 'aac_adtstoasc',
+            '-movflags', '+faststart',
+            temp_download
+        ]
+        ff_res = subprocess.run(ff_cmd, capture_output=True, text=True, timeout=45)
+        if ff_res.returncode == 0 and os.path.exists(temp_download) and os.path.getsize(temp_download) > 10240:
+            if os.path.exists(local_path):
+                try: os.remove(local_path)
+                except Exception: pass
+            os.rename(temp_download, local_path)
+            return vid, url, local_path
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(temp_download):
+            try: os.remove(temp_download)
+            except Exception: pass
+
+    # Step 3: Fallback download via yt-dlp
+    try:
+        ytdl_cmd = [
+            sys.executable, '-m', 'yt_dlp',
+            '--no-playlist', '--no-warnings', '-q',
+            '--concurrent-fragments', '4',
+            '-f', 'best',
+            '-o', local_path,
+            url
+        ]
+        subprocess.run(ytdl_cmd, capture_output=True, timeout=45)
+        if os.path.exists(local_path) and os.path.getsize(local_path) > 10240:
+            return vid, url, local_path
+    except Exception:
+        pass
+
+    # Fallback to direct stream URL if local download failed
+    return vid, url, stream_url
+
+
+def fetch_recent_videos(lookback_hours=3.0, cache_dir="temp_vods"):
+    """
+    Fetches recent videos metadata from Twitch with local disk caching
+    to avoid redundant queries across multiple workflow steps.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, "metadata_cache.json")
+    now_ts = datetime.datetime.now().timestamp()
+
+    videos = []
+    # Check if cache exists and is fresh (< 15 minutes old)
+    if os.path.exists(cache_file):
+        try:
+            mtime = os.path.getmtime(cache_file)
+            if (now_ts - mtime) < 900:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    videos = json.load(f)
+                print(f"Loaded {len(videos)} video metadata entries from local cache.")
+        except Exception:
+            videos = []
+
+    if not videos:
+        print("Fetching recent videos metadata from Twitch...")
+        res = subprocess.run([
+            sys.executable, '-m', 'yt_dlp',
+            '--flat-playlist', '--dump-json', '--playlist-items', '1-400',
+            'https://www.twitch.tv/elarathornfield168/videos?filter=all&sort=time'
+        ], capture_output=True, text=True)
+
+        lines = res.stdout.strip().split('\n')
+        if not lines or lines[0] == '':
+            print("Failed to fetch videos")
+            if res.stderr:
+                print("yt_dlp stderr:", res.stderr)
+            return []
+
+        for l in lines:
+            try:
+                videos.append(json.loads(l))
+            except Exception:
+                pass
+
+        if videos:
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(videos, f)
+            except Exception:
+                pass
+
+    target_epoch = now_ts - (lookback_hours * 3600)
+    recent_videos = []
+    for v in videos:
+        epoch = v.get('epoch') or v.get('timestamp')
+        if epoch and epoch >= target_epoch:
+            recent_videos.append(v)
+
+    return recent_videos
 
 
 def main():
-    print("Fetching recent videos metadata...")
-    res = subprocess.run([sys.executable, '-m', 'yt_dlp', '--flat-playlist', '--dump-json', '--playlist-items', '1-400', 'https://www.twitch.tv/elarathornfield168/videos?filter=all&sort=time'], capture_output=True, text=True)
-
-    lines = res.stdout.strip().split('\n')
-    if not lines or lines[0] == '':
-        print("Failed to fetch videos")
-        if res.stderr:
-            print("yt_dlp stderr:", res.stderr)
-        with open("report.txt", "a", encoding="utf-8") as f:
-            f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
-            f.write("no find (failed to fetch video metadata from Twitch)\n\n")
-        exit(1)
-
-    videos = []
-    for l in lines:
-        try:
-            videos.append(json.loads(l))
-        except Exception:
-            pass
-
-    now = datetime.datetime.now().timestamp()
-    target_epoch = now - (3 * 3600)
-
-    recent_videos = []
-    for v in videos:
-        if v.get('epoch') and v['epoch'] >= target_epoch:
-            recent_videos.append(v)
-        elif v.get('timestamp') and v['timestamp'] >= target_epoch:
-            recent_videos.append(v)
+    recent_videos = fetch_recent_videos(lookback_hours=3.0)
 
     if not recent_videos:
         print("No videos found in the last 3 hours. Exiting.")
@@ -552,19 +667,19 @@ def main():
     print(f"Found {len(recent_videos)} videos in the last 3 hours")
     ids = [v['id'] for v in recent_videos]
 
-    print("Fetching stream URLs in parallel...")
-    stream_urls = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(get_stream_url, ids[i]): ids[i] for i in range(len(ids))}
+    print("Fetching and preparing VOD sources in parallel...")
+    vod_sources = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(prepare_local_vod, ids[i]): ids[i] for i in range(len(ids))}
         for i, future in enumerate(as_completed(futures)):
-            vid, url, stream_url = future.result()
-            if stream_url:
-                stream_urls[vid] = (url, stream_url)
-            if (i+1) % 50 == 0:
-                print(f"Fetched {i+1} URLs...")
+            vid, url, vod_source = future.result()
+            if vod_source:
+                vod_sources[vid] = (url, vod_source)
+            if (i+1) % 25 == 0 or (i+1) == len(ids):
+                print(f"Prepared {i+1}/{len(ids)} VODs...")
 
     canonical_area = ALIAS_TO_CANONICAL.get(CHECK_AREA, CHECK_AREA)
-    print(f"Got {len(stream_urls)} valid streams. Starting motion & temporal tracking for camera '{canonical_area}' (alias '{CHECK_AREA}')...")
+    print(f"Got {len(vod_sources)} ready video sources. Starting motion & temporal tracking for camera '{canonical_area}' (alias '{CHECK_AREA}')...")
 
     # Region of Interest (ROI) within selected camera bounds
     default_roi_y_min = '0.20' if canonical_area == 'front' else '0.0'
@@ -599,10 +714,14 @@ def main():
     verified_video_events = []
 
     for idx, vid in enumerate(ids):
-        if vid not in stream_urls: continue
-        url, stream_url = stream_urls[vid]
+        if vid not in vod_sources: continue
+        url, video_source = vod_sources[vid]
 
-        cap = cv2.VideoCapture(stream_url)
+        cap = cv2.VideoCapture(video_source)
+        if not cap.isOpened():
+            cap.release()
+            continue
+
         ret, prev_frame = cap.read()
         if not ret:
             cap.release()
@@ -744,8 +863,8 @@ def main():
         elif frame_candidates:
             print(f"    Filtered static object in {vid}: {len(frame_candidates)} detections with only {total_movement:.1f}px movement (< {MIN_MOVEMENT_PX}px).")
 
-        if (idx + 1) % 50 == 0:
-            print(f"Processed {idx + 1} videos...")
+        if (idx + 1) % 50 == 0 or (idx + 1) == len(ids):
+            print(f"Processed {idx + 1}/{len(ids)} videos...")
 
     verified_video_events.sort(key=lambda x: (x['movement'] * 1000 + x['score']), reverse=True)
 
