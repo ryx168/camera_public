@@ -301,7 +301,7 @@ def send_email(dry_run=False):
     print(f"Parsed {len(sections)} sections. Found {len(images_to_attach)} snapshot image(s): {images_to_attach}")
 
     # Build MIME Message
-    # Root is "mixed" to allow standard downloadable attachments (paperclip icon)
+    # Use MIMEMultipart("mixed") root with nested MIMEMultipart("alternative")
     msg_root = MIMEMultipart("mixed")
     msg_root["Subject"] = subject
     
@@ -310,35 +310,23 @@ def send_email(dry_run=False):
     msg_root["From"] = from_addr
     msg_root["To"] = to_addr
 
-    # "related" container holds the HTML and the inline images referenced by it
-    msg_related = MIMEMultipart("related")
-    msg_root.attach(msg_related)
-
-    # "alternative" container for plain text and html
+    # Add alternative part (plain text + html)
     msg_alt = MIMEMultipart("alternative")
     msg_alt.attach(MIMEText(plain_body, "plain", "utf-8"))
     msg_alt.attach(MIMEText(html_body, "html", "utf-8"))
-    msg_related.attach(msg_alt)
+    msg_root.attach(msg_alt)
 
-    # Attach images BOTH as inline (for HTML viewing) and as standard attachments (for downloading)
+    # Attach images with Content-ID for inline rendering and Content-Disposition for download
     for img_path in images_to_attach:
         try:
             with open(img_path, "rb") as f:
                 img_data = f.read()
             filename = os.path.basename(img_path)
-            
-            # 1. Inline image for the HTML cid: tags
-            img_inline = MIMEImage(img_data)
-            img_inline.add_header("Content-ID", f"<{filename}>")
-            img_inline.add_header("Content-Disposition", "inline", filename=filename)
-            msg_related.attach(img_inline)
-
-            # 2. Standard attachment for the paperclip icon and easy downloading
-            img_attach = MIMEImage(img_data)
-            img_attach.add_header("Content-Disposition", "attachment", filename=filename)
-            msg_root.attach(img_attach)
-            
-            print(f"Attached image: {filename} (Inline and Attachment, {len(img_data)} bytes)")
+            img_part = MIMEImage(img_data)
+            img_part.add_header("Content-ID", f"<{filename}>")
+            img_part.add_header("Content-Disposition", "inline", filename=filename)
+            msg_root.attach(img_part)
+            print(f"Attached image: {filename} (Content-ID: <{filename}>, {len(img_data)} bytes)")
         except Exception as e:
             print(f"Warning: Failed to attach image {img_path}: {e}")
 
