@@ -46,8 +46,11 @@ jobs:
 
           smtp_host = os.environ.get('SMTP_SERVER') or 'smtp.postmarkapp.com'
           smtp_port = int(os.environ.get('SMTP_PORT') or 587)
-          smtp_user = os.environ.get('SMTP_USERNAME') or '8f23463b-5db0-4bfb-9adc-fa13016656d2'
-          smtp_pass = os.environ.get('SMTP_PASSWORD') or '8f23463b-5db0-4bfb-9adc-fa13016656d2'
+          smtp_user = os.environ.get('SMTP_USERNAME') or ''
+          smtp_pass = os.environ.get('SMTP_PASSWORD') or ''
+
+          if not smtp_user or not smtp_pass:
+              raise ValueError('SMTP_USERNAME and SMTP_PASSWORD secrets are required.')
 
           print(f'Sending email to harry@superesolutions.com via {smtp_host}:{smtp_port}...')
           with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:

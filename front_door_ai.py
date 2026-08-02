@@ -67,8 +67,8 @@ class MultiCameraPersonDetector:
         self.email_from = email_from or os.environ.get("ALERT_EMAIL_FROM", "harry@superesolutions.com")
         self.smtp_host = smtp_host or os.environ.get("SMTP_HOST", "smtp.postmarkapp.com")
         self.smtp_port = int(smtp_port or os.environ.get("SMTP_PORT", "587"))
-        self.smtp_user = smtp_user or os.environ.get("SMTP_USER", "8f23463b-5db0-4bfb-9adc-fa13016656d2")
-        self.smtp_pass = smtp_pass or os.environ.get("SMTP_PASS", "8f23463b-5db0-4bfb-9adc-fa13016656d2")
+        self.smtp_user = smtp_user or os.environ.get("SMTP_USER", "")
+        self.smtp_pass = smtp_pass or os.environ.get("SMTP_PASS", "")
 
         # Track cooldown per camera
         self.last_detection_times = {name: 0 for name in cameras}

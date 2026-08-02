@@ -13,9 +13,15 @@ vscode_cf.log
 logs/
 *.log
 
-# Temp recordings
+# Temp recordings and cache
 /tmp/camera-recordings/
+temp_vods/
+
+# Generated reports and snapshots
+report.txt
+snapshot_*.jpg
 
 # Python cache
 __pycache__/
+
 
