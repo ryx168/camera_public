@@ -49,7 +49,7 @@ def parse_report_file(report_path="report.txt"):
             "video_url": extract_first_match(r"Top video:\s*(https?://[^\s]+)", raw_text),
             "timestamp_str": extract_first_match(r"at\s+([\d\.]+s)", raw_text),
             "score_str": extract_first_match(r"Motion Score:\s*([^\n]+)", raw_text),
-            "screenshot": extract_first_match(r"Screenshot:\s*([^\n]+)", raw_text),
+            "screenshots": extract_screenshots(raw_text, "General Check"),
             "candidates": extract_candidates(raw_text)
         }], raw_text
 
@@ -69,13 +69,7 @@ def parse_report_file(report_path="report.txt"):
         t_match = re.search(r"at\s+([\d\.]+)s", content)
         timestamp_str = f"{t_match.group(1)}s" if t_match else ""
         score_str = extract_first_match(r"Motion Score:\s*([^\n]+)", content)
-        screenshot = extract_first_match(r"Screenshot:\s*([^\n]+)", content)
-        
-        # Fallback to check if a matching snapshot exists on disk
-        if not screenshot:
-            expected_shot = f"snapshot_{area_name}.jpg"
-            if os.path.exists(expected_shot):
-                screenshot = expected_shot
+        screenshots = extract_screenshots(content, area_name)
 
         candidates = extract_candidates(content)
 
@@ -88,7 +82,7 @@ def parse_report_file(report_path="report.txt"):
             "video_url": video_url,
             "timestamp_str": timestamp_str,
             "score_str": score_str,
-            "screenshot": screenshot,
+            "screenshots": screenshots,
             "candidates": candidates
         })
 
@@ -102,6 +96,40 @@ def extract_first_match(pattern, text):
 
 def extract_candidates(text):
     return re.findall(r"Rank\s+\d+:\s*(https?://[^\n]+)", text)
+
+
+def extract_screenshots(text, area_name):
+    """
+    Extract the (up to 3) START/PEAK/END screenshots near the detection time
+    from lines like: 'Screenshot [PEAK] at 14.1s: snapshot_house_around_peak.jpg'.
+    Falls back to a legacy single 'Screenshot: path' line, and finally to any
+    snapshot_<area>_*.jpg files that exist on disk, so older report formats
+    still work.
+    """
+    shots = []
+    for m in re.finditer(r"Screenshot\s*\[(\w+)\]\s*at\s*([\d\.]+)s:\s*([^\n]+)", text):
+        phase, t_str, path = m.group(1), m.group(2), m.group(3).strip()
+        if os.path.exists(path):
+            shots.append({"phase": phase, "time": t_str, "path": path})
+
+    if not shots:
+        legacy = extract_first_match(r"Screenshot:\s*([^\n]+)", text)
+        if legacy and os.path.exists(legacy):
+            shots.append({"phase": "DETECTION", "time": "", "path": legacy})
+
+    if not shots:
+        # Fallback: glob for files saved by the current naming scheme
+        safe_area = re.sub(r"[^a-zA-Z0-9_]+", "_", area_name.strip().lower())
+        phase_order = {"start": 0, "peak": 1, "end": 2}
+        found = sorted(
+            glob.glob(f"snapshot_{safe_area}_*.jpg"),
+            key=lambda p: phase_order.get(Path(p).stem.split("_")[-1], 99)
+        )
+        for path in found:
+            phase = Path(path).stem.split("_")[-1].upper()
+            shots.append({"phase": phase, "time": "", "path": path})
+
+    return shots[:3]
 
 
 def build_email_content(sections, raw_text):
@@ -156,18 +184,32 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
             badge_text = "✅ ALL CLEAR"
 
         shot_html = ""
-        if s["detected"] and s.get("screenshot") and os.path.exists(s["screenshot"]):
-            cid_name = Path(s["screenshot"]).name
+        if s["detected"] and s.get("screenshots"):
+            shot_cells = ""
+            for shot in s["screenshots"]:
+                cid_name = Path(shot["path"]).name
+                phase_label = shot["phase"].title()
+                time_label = f" at {shot['time']}s" if shot.get("time") else ""
+                shot_cells += f"""
+                <td style="padding: 6px; text-align: center; vertical-align: top; width: 33%;">
+                    <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                        {phase_label}{time_label}
+                    </div>
+                    <a href="{s['video_url']}" target="_blank" style="display: block; text-decoration: none;">
+                        <img src="cid:{cid_name}" alt="{area_title} {phase_label} Screenshot" style="width: 100%; height: auto; border-radius: 6px; border: 1px solid #334155; display: block;" />
+                    </a>
+                </td>
+                """
             shot_html = f"""
-            <div style="margin-top: 16px; background: #0f172a; padding: 12px; border-radius: 8px; text-align: center;">
-                <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
-                    📸 Screenshot at Detection Moment ({s['timestamp_str']})
+            <div style="margin-top: 16px; background: #0f172a; padding: 12px; border-radius: 8px;">
+                <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">
+                    📸 Screenshots Near Detection Time ({s['timestamp_str']})
                 </div>
-                <a href="{s['video_url']}" target="_blank" style="display: block; text-decoration: none;">
-                    <img src="cid:{cid_name}" alt="{area_title} Detection Screenshot" style="width: 100%; max-width: 600px; height: auto; border-radius: 6px; border: 1px solid #334155; display: block; margin: 0 auto;" />
-                </a>
-                <div style="margin-top: 8px; font-size: 11px; color: #64748b;">
-                    File: {cid_name} &bull; Click image to open Twitch stream
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>{shot_cells}</tr>
+                </table>
+                <div style="margin-top: 8px; font-size: 11px; color: #64748b; text-align: center;">
+                    Click any image to open the Twitch stream
                 </div>
             </div>
             """
@@ -285,13 +327,14 @@ def send_email(dry_run=False):
     sections, raw_text = parse_report_file(report_path)
     subject, plain_body, html_body = build_email_content(sections, raw_text)
 
-    # Collect all screenshot images to attach
+    # Collect all screenshot images to attach (up to 3 per section)
     images_to_attach = []
     # 1. From parsed sections
     for s in sections:
-        shot = s.get("screenshot")
-        if shot and os.path.exists(shot) and shot not in images_to_attach:
-            images_to_attach.append(shot)
+        for shot in s.get("screenshots", []):
+            path = shot.get("path")
+            if path and os.path.exists(path) and path not in images_to_attach:
+                images_to_attach.append(path)
 
     # 2. Any additional snapshot_*.jpg files in current directory
     for f in glob.glob("snapshot_*.jpg"):

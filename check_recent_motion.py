@@ -5,8 +5,9 @@ Scans recent Twitch VODs for motion and person/car activity.
 Detects camera count and layout by reading corner text labels ('Office', 'Front', 'Kitchen'/'Kichen', 'Balcony', 'Backyard').
 Matches the same camera screen across frames and rejects cross-layout comparisons.
 Performs temporal multi-frame motion verification across at least 3 frames to reject
-static false positives (railings, tree trunks, gates, posts) and generates a 3-frame
-composite group snapshot illustrating object displacement over time.
+static false positives (railings, tree trunks, gates, posts) and saves 3 separate
+(START/PEAK/END) annotated screenshots illustrating object displacement over time,
+all limited to videos from the last LOOKBACK_HOURS (default 3) hours.
 """
 
 import json
@@ -416,12 +417,22 @@ def verify_moving_event(candidates, min_move_px=25.0):
     return True, [c_start, c_mid, c_end], best_move
 
 
-def annotate_and_save_group_snapshot(three_frames_data, area_name, target_obj, vid, url, total_movement_px, output_path):
+def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, url, total_movement_px, output_prefix):
     """
-    Builds a single 3-frame composite group image showing the object moving
-    across 3 distinct time points, with master HUD header and per-frame tracking labels.
+    Saves 3 SEPARATE annotated screenshot images (START, PEAK, END) - one per
+    verified detection frame - instead of a single stacked composite. Each frame
+    is labeled with its own HUD header showing camera, target, timestamp and
+    displacement info so the email can show all three near the detection time.
+
+    Returns a list of dicts: [{'path':..., 'time':..., 'phase':...}, ...] in
+    START -> PEAK -> END order.
     """
-    annotated_frames = []
+    out_dir = os.path.dirname(os.path.abspath(output_prefix))
+    os.makedirs(out_dir, exist_ok=True)
+
+    now_utc_str = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    phase_suffix_map = {'START': 'start', 'PEAK': 'peak', 'END': 'end'}
+    saved = []
 
     for idx, item in enumerate(three_frames_data):
         frame = item['frame'].copy()
@@ -434,6 +445,7 @@ def annotate_and_save_group_snapshot(three_frames_data, area_name, target_obj, v
         cx, cy = item.get('center', (0, 0))
         motion_px = item.get('motion', 0)
         cam_name = item.get('cam_name', area_name)
+        cam_count = item.get('cam_count', 5)
 
         # 1. Highlight ROI
         if crop_roi is not None:
@@ -452,57 +464,26 @@ def annotate_and_save_group_snapshot(three_frames_data, area_name, target_obj, v
                 label_txt = f"{target_obj.capitalize()} ({conf:.2f}) Pos:({int(cx)},{int(cy)})"
                 cv2.putText(frame, label_txt, (px1, max(py1 - 6, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
 
-        # 3. Sub-header bar on individual frame
-        sub_bar_h = 32
-        sub_overlay = frame.copy()
-        cv2.rectangle(sub_overlay, (0, 0), (w, sub_bar_h), (20, 20, 30), -1)
-        cv2.addWeighted(sub_overlay, 0.75, frame, 0.25, 0, frame)
-        cv2.line(frame, (0, sub_bar_h), (w, sub_bar_h), (0, 180, 255), 1)
+        # 3. HUD header bar (2 lines) on this individual frame
+        header_h = 54
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (w, header_h), (12, 12, 22), -1)
+        cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
+        cv2.line(frame, (0, header_h), (w, header_h), (0, 160, 255), 2)
 
-        cam_count = item.get('cam_count', 5)
-        sub_text = f"FRAME {idx+1}/3 [{phase}] ({cam_name.upper()} in {cam_count}-Cam Layout) | Time: {t_sec:.1f}s | Target Pos: ({int(cx)}, {int(cy)}) | Motion: {motion_px:,} px"
-        cv2.putText(frame, sub_text, (10, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 1, cv2.LINE_AA)
+        line1 = f"[{phase}] {cam_name.upper()} | Target: {target_obj.upper()} | Layout: {cam_count}-Cam | Frame {idx+1}/3"
+        cv2.putText(frame, line1, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 235, 255), 1, cv2.LINE_AA)
 
-        annotated_frames.append(frame)
+        line2 = f"VOD {vid} @ {t_sec:.1f}s | Motion: {motion_px:,}px | Total Movement: {total_movement_px:.1f}px | {now_utc_str}"
+        cv2.putText(frame, line2, (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
 
-    # Master Composite: Stack 3 frames vertically with master header
-    frame_h, frame_w = annotated_frames[0].shape[:2]
-    header_h = 60
-    divider_h = 4
-    total_h = header_h + (frame_h * 3) + (divider_h * 2)
+        suffix = phase_suffix_map.get(phase, f"f{idx+1}")
+        out_path = f"{output_prefix}_{suffix}.jpg"
+        cv2.imwrite(out_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        saved.append({'path': out_path, 'time': t_sec, 'phase': phase})
+        print(f"Saved snapshot [{phase}] at {t_sec:.1f}s to: {out_path}")
 
-    composite = np.zeros((total_h, frame_w, 3), dtype=np.uint8)
-
-    # Master Header background
-    cv2.rectangle(composite, (0, 0), (frame_w, header_h), (12, 12, 22), -1)
-    cv2.line(composite, (0, header_h), (frame_w, header_h), (0, 0, 230), 2)
-
-    # Master Header text
-    t1 = three_frames_data[0]['time']
-    t2 = three_frames_data[1]['time']
-    t3 = three_frames_data[2]['time']
-    cam_count = three_frames_data[0].get('cam_count', 5)
-    cam_name = three_frames_data[0].get('cam_name', area_name)
-    now_utc_str = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    line1 = f"[CONFIRMED MOVING EVENT] Camera: {cam_name.upper()} | Target: {target_obj.upper()} | Layout: {cam_count}-Cam Grid | Movement: {total_movement_px:.1f} px across 3 frames"
-    cv2.putText(composite, line1, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 235, 255), 2, cv2.LINE_AA)
-
-    line2 = f"Twitch VOD: {vid} | Multi-Frame Sequence: {t1:.1f}s -> {t2:.1f}s -> {t3:.1f}s | Captured: {now_utc_str}"
-    cv2.putText(composite, line2, (12, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (220, 220, 220), 1, cv2.LINE_AA)
-
-    # Place the 3 frames
-    curr_y = header_h
-    for idx, f_img in enumerate(annotated_frames):
-        composite[curr_y : curr_y + frame_h, 0 : frame_w] = f_img
-        curr_y += frame_h
-        if idx < 2:
-            cv2.rectangle(composite, (0, curr_y), (frame_w, curr_y + divider_h), (0, 160, 255), -1)
-            curr_y += divider_h
-
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    cv2.imwrite(output_path, composite, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-    print(f"Saved 3-frame group motion snapshot to: {output_path}")
+    return saved
 
 
 # Suppress noisy OpenCV / FFmpeg stderr warnings and configure timeouts
@@ -659,16 +640,17 @@ def fetch_recent_videos(lookback_hours=3.0, cache_dir="temp_vods"):
 
 
 def main():
-    recent_videos = fetch_recent_videos(lookback_hours=3.0)
+    lookback_hours = float(os.environ.get('LOOKBACK_HOURS', '3.0'))
+    recent_videos = fetch_recent_videos(lookback_hours=lookback_hours)
 
     if not recent_videos:
-        print("No videos found in the last 3 hours. Exiting.")
+        print(f"No videos found in the last {lookback_hours:.1f} hours. Exiting.")
         with open("report.txt", "a", encoding="utf-8") as f:
             f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
-            f.write("no videos in the last 3 hours\n\n")
+            f.write(f"no videos in the last {lookback_hours:.1f} hours\n\n")
         exit(0)
 
-    print(f"Found {len(recent_videos)} videos in the last 3 hours")
+    print(f"Found {len(recent_videos)} videos in the last {lookback_hours:.1f} hours")
     ids = [v['id'] for v in recent_videos]
 
     print("Fetching and preparing VOD sources in parallel...")
@@ -872,18 +854,19 @@ def main():
 
     verified_video_events.sort(key=lambda x: (x['movement'] * 1000 + x['score']), reverse=True)
 
-    snapshot_file = f"snapshot_{CHECK_AREA}.jpg"
+    snapshot_prefix = f"snapshot_{CHECK_AREA}"
+    saved_snapshots = []
 
     if verified_video_events:
         top_event = verified_video_events[0]
-        annotate_and_save_group_snapshot(
+        saved_snapshots = annotate_and_save_snapshots(
             three_frames_data=top_event['three_frames'],
             area_name=CHECK_AREA,
             target_obj=TARGET_OBJECT,
             vid=top_event['vid'],
             url=top_event['url'],
             total_movement_px=top_event['movement'],
-            output_path=snapshot_file
+            output_prefix=snapshot_prefix
         )
 
     with open("report.txt", "a", encoding="utf-8") as f:
@@ -893,7 +876,9 @@ def main():
             f.write(f"OBJECT FOUND!\n\n")
             f.write(f"Top video: {top_event['url']} at {top_event['time_peak']:.1f}s\n")
             f.write(f"Motion Score: {top_event['score']} pixels (Displacement: {top_event['movement']:.1f}px across 3 frames)\n")
-            f.write(f"Screenshot: {snapshot_file}\n\n")
+            for s in saved_snapshots:
+                f.write(f"Screenshot [{s['phase']}] at {s['time']:.1f}s: {s['path']}\n")
+            f.write("\n")
             f.write("Other top candidates:\n")
             for i in range(1, min(5, len(verified_video_events))):
                 ev = verified_video_events[i]
