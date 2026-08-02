@@ -561,8 +561,10 @@ def prepare_local_vod(vid, temp_dir="temp_vods"):
             '-movflags', '+faststart',
             temp_download
         ]
-        ff_res = subprocess.run(ff_cmd, capture_output=True, text=True, timeout=45)
-        if ff_res.returncode == 0 and os.path.exists(temp_download) and os.path.getsize(temp_download) > 10240:
+        ff_res = subprocess.run(ff_cmd, capture_output=True, text=True, timeout=60)
+        # We DO NOT check ff_res.returncode == 0 because ffmpeg often returns an error (e.g. 1) 
+        # when an HLS stream ends abruptly without a clean endlist tag.
+        if os.path.exists(temp_download) and os.path.getsize(temp_download) > 10240:
             if os.path.exists(local_path):
                 try: os.remove(local_path)
                 except Exception: pass
@@ -585,14 +587,16 @@ def prepare_local_vod(vid, temp_dir="temp_vods"):
             '-o', local_path,
             url
         ]
-        subprocess.run(ytdl_cmd, capture_output=True, timeout=45)
+        subprocess.run(ytdl_cmd, capture_output=True, timeout=120)
         if os.path.exists(local_path) and os.path.getsize(local_path) > 10240:
             return vid, url, local_path
     except Exception:
         pass
 
-    # Fallback to direct stream URL if local download failed
-    return vid, url, stream_url
+    # CRITICAL: Do NOT return stream_url! If local download completely fails, 
+    # we must return None to skip this video. Passing stream_url to OpenCV 
+    # guarantees a 30s timeout hang due to OpenCV's internal FFmpeg interrupt callback.
+    return vid, url, None
 
 
 def fetch_recent_videos(lookback_hours=3.0, cache_dir="temp_vods"):
