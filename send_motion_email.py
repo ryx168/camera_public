@@ -301,8 +301,8 @@ def send_email(dry_run=False):
     print(f"Parsed {len(sections)} sections. Found {len(images_to_attach)} snapshot image(s): {images_to_attach}")
 
     # Build MIME Message
-    # Use MIMEMultipart("mixed") root with nested MIMEMultipart("alternative")
-    msg_root = MIMEMultipart("mixed")
+    # Use MIMEMultipart("related") root to properly support inline HTML images
+    msg_root = MIMEMultipart("related")
     msg_root["Subject"] = subject
     
     from_addr = os.environ.get("SMTP_FROM") or "harry@superesolutions.com"
