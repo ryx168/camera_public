@@ -29,14 +29,27 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 
-def get_pacific_time():
+def get_pacific_time(dt=None, epoch=None):
     """
-    Get current datetime in US Pacific timezone (America/Los_Angeles).
-    Handles Daylight Saving Time (PDT, UTC-7) vs Standard Time (PST, UTC-8) accurately.
+    Get datetime in US Pacific timezone (America/Los_Angeles).
+    Supports converting an existing datetime object or epoch timestamp to Pacific Time.
+    If neither is passed, returns the current Pacific datetime.
+    Accurately handles Daylight Saving Time (PDT, UTC-7) vs Standard Time (PST, UTC-8)
+    across Python 3.9+ (zoneinfo), python-dateutil, and dynamic UTC-offset fallback.
     """
+    if epoch is not None:
+        target_utc = datetime.datetime.fromtimestamp(epoch, tz=timezone.utc)
+    elif dt is not None:
+        if dt.tzinfo is None:
+            target_utc = dt.replace(tzinfo=timezone.utc)
+        else:
+            target_utc = dt.astimezone(timezone.utc)
+    else:
+        target_utc = datetime.datetime.now(timezone.utc)
+
     try:
         from zoneinfo import ZoneInfo
-        return datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
+        return target_utc.astimezone(ZoneInfo("America/Los_Angeles"))
     except Exception:
         pass
 
@@ -44,23 +57,25 @@ def get_pacific_time():
         import dateutil.tz
         tz = dateutil.tz.gettz("America/Los_Angeles")
         if tz:
-            return datetime.datetime.now(tz)
+            return target_utc.astimezone(tz)
     except Exception:
         pass
 
-    now_utc = datetime.datetime.now(timezone.utc)
-    year = now_utc.year
+    # Dynamic US Pacific DST calculation:
+    # DST begins 2nd Sunday in March at 2:00 AM PST (10:00 UTC)
+    # DST ends 1st Sunday in November at 2:00 AM PDT (9:00 UTC)
+    year = target_utc.year
     mar1 = datetime.datetime(year, 3, 1, tzinfo=timezone.utc)
     dst_start = mar1 + datetime.timedelta(days=(6 - mar1.weekday() + 7) % 7 + 7, hours=10)
     nov1 = datetime.datetime(year, 11, 1, tzinfo=timezone.utc)
     dst_end = nov1 + datetime.timedelta(days=(6 - nov1.weekday()) % 7, hours=9)
 
-    if dst_start <= now_utc < dst_end:
+    if dst_start <= target_utc < dst_end:
         tz_offset = datetime.timezone(datetime.timedelta(hours=-7), name="PDT")
     else:
         tz_offset = datetime.timezone(datetime.timedelta(hours=-8), name="PST")
 
-    return now_utc.astimezone(tz_offset)
+    return target_utc.astimezone(tz_offset)
 
 CHECK_AREA = os.environ.get('CHECK_AREA', 'house_around').lower().strip()
 TARGET_OBJECT = os.environ.get('TARGET_OBJECT', 'person')
@@ -451,11 +466,11 @@ def verify_moving_event(candidates, min_move_px=25.0):
     return True, [c_start, c_mid, c_end], best_move
 
 
-def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, url, total_movement_px, output_prefix):
+def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, url, total_movement_px, output_prefix, vod_epoch=None):
     """
     Saves 3 SEPARATE annotated screenshot images (START, PEAK, END) - one per
     verified detection frame - instead of a single stacked composite. Each frame
-    is labeled with its own HUD header showing camera, target, timestamp and
+    is labeled with its own HUD header showing camera, target, timestamp (in Pacific Time) and
     displacement info so the email can show all three near the detection time.
 
     Returns a list of dicts: [{'path':..., 'time':..., 'phase':...}, ...] in
@@ -484,6 +499,13 @@ def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, u
             cam_name = item.get('cam_name', area_name)
             cam_count = item.get('cam_count', 5)
 
+            # Format frame detection time in Pacific Time (PST/PDT)
+            vod_time_info = ""
+            if vod_epoch:
+                f_pac = get_pacific_time(epoch=vod_epoch + t_sec)
+                f_tz = f_pac.strftime("%Z") or "PDT"
+                vod_time_info = f" | {f_pac.strftime('%I:%M:%S %p')} {f_tz}"
+
             # 1. Highlight ROI
             if crop_roi is not None:
                 rx1, ry1, rx2, ry2 = crop_roi
@@ -511,7 +533,7 @@ def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, u
             line1 = f"[{phase}] {cam_name.upper()} | Target: {target_obj.upper()} | Layout: {cam_count}-Cam | Frame {idx+1}/3"
             cv2.putText(frame, line1, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 235, 255), 1, cv2.LINE_AA)
 
-            line2 = f"VOD {vid} @ {t_sec:.1f}s | Motion: {motion_px:,}px | Total Movement: {total_movement_px:.1f}px | {now_time_str}"
+            line2 = f"VOD {vid} @ {t_sec:.1f}s{vod_time_info} | Motion: {motion_px:,}px | Move: {total_movement_px:.1f}px | Check: {now_time_str}"
             cv2.putText(frame, line2, (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
 
             suffix = phase_suffix_map.get(phase, f"f{idx+1}")
@@ -632,7 +654,10 @@ def fetch_recent_videos(lookback_hours=3.0, cache_dir="temp_vods"):
     """
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(cache_dir, "metadata_cache.json")
-    now_ts = datetime.datetime.now().timestamp()
+    now_utc = datetime.datetime.now(timezone.utc)
+    now_ts = now_utc.timestamp()
+    now_pac = get_pacific_time(dt=now_utc)
+    now_pac_str = now_pac.strftime(f"%Y-%m-%d %I:%M:%S %p {now_pac.strftime('%Z') or 'PDT'}")
 
     videos = []
     # Check if cache exists and is fresh (< 15 minutes old)
@@ -647,7 +672,7 @@ def fetch_recent_videos(lookback_hours=3.0, cache_dir="temp_vods"):
             videos = []
 
     if not videos:
-        print("Fetching recent videos metadata from Twitch...")
+        print(f"Fetching recent videos metadata from Twitch (as of {now_pac_str})...")
         res = subprocess.run([
             sys.executable, '-m', 'yt_dlp',
             '--flat-playlist', '--dump-json', '--playlist-items', '1-400',
@@ -675,10 +700,15 @@ def fetch_recent_videos(lookback_hours=3.0, cache_dir="temp_vods"):
                 pass
 
     target_epoch = now_ts - (lookback_hours * 3600)
+    start_pac = get_pacific_time(epoch=target_epoch)
+    start_pac_str = start_pac.strftime(f"%Y-%m-%d %I:%M:%S %p {start_pac.strftime('%Z') or 'PDT'}")
+    print(f"Scan window (Pacific Time): {start_pac_str} to {now_pac_str} ({lookback_hours:.1f} hours)")
+
     recent_videos = []
     for v in videos:
-        epoch = v.get('epoch') or v.get('timestamp')
+        epoch = v.get('epoch') or v.get('timestamp') or v.get('release_timestamp')
         if epoch and epoch >= target_epoch:
+            v['epoch'] = epoch
             recent_videos.append(v)
 
     return recent_videos
@@ -688,15 +718,21 @@ def main():
     lookback_hours = float(os.environ.get('LOOKBACK_HOURS', '3.0'))
     recent_videos = fetch_recent_videos(lookback_hours=lookback_hours)
 
+    now_pac = get_pacific_time()
+    tz_abbr = now_pac.strftime("%Z") or "PDT"
+    now_pac_str = now_pac.strftime(f"%Y-%m-%d %I:%M:%S %p {tz_abbr}")
+
     if not recent_videos:
-        print(f"No videos found in the last {lookback_hours:.1f} hours. Exiting.")
+        print(f"No videos found in the last {lookback_hours:.1f} hours ({now_pac_str}). Exiting.")
         with open("report.txt", "a", encoding="utf-8") as f:
             f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
+            f.write(f"Check Time (Pacific / PST): {now_pac_str}\n")
             f.write(f"no videos in the last {lookback_hours:.1f} hours\n\n")
         exit(0)
 
-    print(f"Found {len(recent_videos)} videos in the last {lookback_hours:.1f} hours")
+    print(f"Found {len(recent_videos)} videos in the last {lookback_hours:.1f} hours (Checked at {now_pac_str})")
     ids = [v['id'] for v in recent_videos]
+    vid_epoch_map = {v['id']: v.get('epoch') for v in recent_videos}
 
     print("Fetching and preparing VOD sources in parallel...")
     vod_sources = {}
@@ -888,6 +924,7 @@ def main():
                 'movement': total_movement,
                 'vid': vid,
                 'url': url,
+                'epoch': vid_epoch_map.get(vid),
                 'time_peak': three_frames[1]['time'],
                 'three_frames': three_frames
             })
@@ -912,7 +949,8 @@ def main():
                 vid=top_event['vid'],
                 url=top_event['url'],
                 total_movement_px=top_event['movement'],
-                output_prefix=snapshot_prefix
+                output_prefix=snapshot_prefix,
+                vod_epoch=top_event.get('epoch')
             )
         except Exception as e:
             # Never let a snapshot-rendering failure prevent report.txt from being
@@ -922,10 +960,19 @@ def main():
 
     with open("report.txt", "a", encoding="utf-8") as f:
         f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
+        f.write(f"Check Time (Pacific / PST): {now_pac_str}\n")
         if verified_video_events:
             top_event = verified_video_events[0]
-            f.write(f"OBJECT FOUND!\n\n")
-            f.write(f"Top video: {top_event['url']} at {top_event['time_peak']:.1f}s\n")
+            vod_epoch = top_event.get('epoch')
+            if vod_epoch:
+                ev_pac = get_pacific_time(epoch=vod_epoch + top_event['time_peak'])
+                ev_str = ev_pac.strftime(f"%Y-%m-%d %I:%M:%S %p {ev_pac.strftime('%Z') or 'PDT'}")
+                f.write(f"OBJECT FOUND!\n\n")
+                f.write(f"Detection Time (Pacific): {ev_str}\n")
+                f.write(f"Top video: {top_event['url']} at {top_event['time_peak']:.1f}s ({ev_str})\n")
+            else:
+                f.write(f"OBJECT FOUND!\n\n")
+                f.write(f"Top video: {top_event['url']} at {top_event['time_peak']:.1f}s\n")
             f.write(f"Motion Score: {top_event['score']} pixels (Displacement: {top_event['movement']:.1f}px across 3 frames)\n")
             for s in saved_snapshots:
                 f.write(f"Screenshot [{s['phase']}] at {s['time']:.1f}s: {s['path']}\n")
@@ -933,7 +980,13 @@ def main():
             f.write("Other top candidates:\n")
             for i in range(1, min(5, len(verified_video_events))):
                 ev = verified_video_events[i]
-                f.write(f"Rank {i+1}: {ev['url']} at {ev['time_peak']:.1f}s (Movement: {ev['movement']:.1f}px, Score: {ev['score']})\n")
+                ev_epoch = ev.get('epoch')
+                if ev_epoch:
+                    cand_pac = get_pacific_time(epoch=ev_epoch + ev['time_peak'])
+                    cand_str = cand_pac.strftime(f"%I:%M:%S %p {cand_pac.strftime('%Z') or 'PDT'}")
+                    f.write(f"Rank {i+1}: {ev['url']} at {ev['time_peak']:.1f}s ({cand_str}) (Movement: {ev['movement']:.1f}px, Score: {ev['score']})\n")
+                else:
+                    f.write(f"Rank {i+1}: {ev['url']} at {ev['time_peak']:.1f}s (Movement: {ev['movement']:.1f}px, Score: {ev['score']})\n")
         else:
             f.write("no find\n")
         f.write("\n")

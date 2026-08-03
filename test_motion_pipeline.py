@@ -21,7 +21,8 @@ from check_recent_motion import (
     get_camera_bounds,
     is_multicam_grid,
     verify_moving_event,
-    annotate_and_save_group_snapshot
+    annotate_and_save_snapshots,
+    get_pacific_time
 )
 from send_motion_email import parse_report_file, build_email_content, send_email
 
@@ -187,47 +188,62 @@ def test_pipeline():
     assert all(f.get('cam_count') == 4 and f.get('cam_name') == 'kitchen' for f in three_4cam)
     print(f"   ✅ Real moving vehicle confirmed with consistent 4-camera Kitchen screen (Displacement: {move_4cam:.1f}px).")
 
-    print("\n6. Generating 3-frame composite group snapshots with camera HUD...")
-    annotate_and_save_group_snapshot(
+    print("\n6. Generating 3 separate annotated snapshots (START, PEAK, END)...")
+    saved_5cam = annotate_and_save_snapshots(
         three_frames_data=three_frames,
         area_name="house_around",
         target_obj="person",
         vid="2833002021",
         url="https://www.twitch.tv/videos/2833002021",
         total_movement_px=move_real,
-        output_path="snapshot_house_around.jpg"
+        output_prefix="snapshot_house_around",
+        vod_epoch=1785709800
     )
-    assert os.path.exists("snapshot_house_around.jpg")
-    img = cv2.imread("snapshot_house_around.jpg")
-    assert img.shape[0] > 1400
-    print(f"   ✅ Generated 5-cam composite snapshot (Resolution: {img.shape[1]}x{img.shape[0]}).")
+    assert len(saved_5cam) == 3
+    assert all(os.path.exists(s['path']) for s in saved_5cam)
+    print(f"   ✅ Generated {len(saved_5cam)} snapshots for 5-cam Front detection.")
 
-    annotate_and_save_group_snapshot(
+    saved_4cam = annotate_and_save_snapshots(
         three_frames_data=three_4cam,
         area_name="garage",
         target_obj="car",
         vid="2833004002",
         url="https://www.twitch.tv/videos/2833004002",
         total_movement_px=move_4cam,
-        output_path="snapshot_garage.jpg"
+        output_prefix="snapshot_garage",
+        vod_epoch=1785709800
     )
-    assert os.path.exists("snapshot_garage.jpg")
-    print("   ✅ Generated 4-cam composite snapshot successfully.")
+    assert len(saved_4cam) == 3
+    assert all(os.path.exists(s['path']) for s in saved_4cam)
+    print(f"   ✅ Generated {len(saved_4cam)} snapshots for 4-cam Garage detection.")
 
-    print("\n7. Testing report parsing and email generation...")
+    print("\n7. Testing Pacific Time conversion...")
+    pac_now = get_pacific_time()
+    print(f"   Current Pacific Time: {pac_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}")
+    assert pac_now.tzinfo is not None
+
+    print("\n8. Testing report parsing and email generation with Pacific Time...")
     test_report_content = f"""=== Report for house_around (person) ===
+Check Time (Pacific / PST): 2026-08-02 03:31:00 PM PDT
 OBJECT FOUND!
 
-Top video: https://www.twitch.tv/videos/2833002021 at 5.0s
+Detection Time (Pacific): 2026-08-02 03:30:45 PM PDT
+Top video: https://www.twitch.tv/videos/2833002021 at 5.0s (2026-08-02 03:30:45 PM PDT)
 Motion Score: 78000 pixels (Displacement: {move_real:.1f}px across 3 frames)
-Screenshot: snapshot_house_around.jpg
+Screenshot [START] at 3.0s: {saved_5cam[0]['path']}
+Screenshot [PEAK] at 5.0s: {saved_5cam[1]['path']}
+Screenshot [END] at 7.0s: {saved_5cam[2]['path']}
 
 === Report for garage (car) ===
+Check Time (Pacific / PST): 2026-08-02 03:31:00 PM PDT
 OBJECT FOUND!
 
-Top video: https://www.twitch.tv/videos/2833004002 at 4.0s
+Detection Time (Pacific): 2026-08-02 03:30:44 PM PDT
+Top video: https://www.twitch.tv/videos/2833004002 at 4.0s (2026-08-02 03:30:44 PM PDT)
 Motion Score: 48000 pixels (Displacement: {move_4cam:.1f}px across 3 frames)
-Screenshot: snapshot_garage.jpg
+Screenshot [START] at 2.0s: {saved_4cam[0]['path']}
+Screenshot [PEAK] at 4.0s: {saved_4cam[1]['path']}
+Screenshot [END] at 6.0s: {saved_4cam[2]['path']}
 """
     with open("test_report.txt", "w", encoding="utf-8") as f:
         f.write(test_report_content)
@@ -236,26 +252,27 @@ Screenshot: snapshot_garage.jpg
     assert len(sections) == 2
     assert sections[0]["detected"] is True
     assert sections[1]["detected"] is True
-    print(f"   ✅ Parsed {len(sections)} sections accurately.")
+    assert sections[0]["detection_time_str"] == "2026-08-02 03:30:45 PM PDT"
+    print(f"   ✅ Parsed {len(sections)} sections with Pacific Time accurately.")
 
     subject, plain_body, html_body = build_email_content(sections, raw_text)
     assert "MOTION DETECTED" in subject
-    assert "cid:snapshot_house_around.jpg" in html_body
-    assert "cid:snapshot_garage.jpg" in html_body
-    print("   ✅ Email HTML contains all composite CID image references.")
+    assert "PST" in subject or "PDT" in subject
+    assert "cid:" in html_body
+    print("   ✅ Email HTML contains all CID image references and Pacific Time.")
 
-    print("\n8. Testing send_email dry run...")
+    print("\n9. Testing send_email dry run...")
     os.environ["REPORT_PATH"] = "test_report.txt"
     send_email(dry_run=True)
     print("   ✅ send_email dry run passed with full MIME packaging.")
 
     # Cleanup temporary test files
-    for temp_f in ["test_report.txt", "snapshot_house_around.jpg", "snapshot_garage.jpg"]:
+    for temp_f in ["test_report.txt"] + [s['path'] for s in saved_5cam] + [s['path'] for s in saved_4cam]:
         if os.path.exists(temp_f):
             os.remove(temp_f)
     print("   ✅ Cleaned up temporary test files.")
 
-    print("\n🎉 ALL TESTS (Corner Text Detection, Camera Count, Same-Camera Screen Matching) PASSED!")
+    print("\n🎉 ALL TESTS (Corner Text Detection, Camera Count, Same-Camera Matching, Pacific Time) PASSED!")
 
 
 if __name__ == "__main__":

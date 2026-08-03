@@ -17,15 +17,27 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 
-def get_pacific_time():
+def get_pacific_time(dt=None, epoch=None):
     """
-    Get current datetime in US Pacific timezone (America/Los_Angeles).
-    Handles Daylight Saving Time (PDT, UTC-7) vs Standard Time (PST, UTC-8) accurately
-    even if the OS or Python environment lacks tzdata.
+    Get datetime in US Pacific timezone (America/Los_Angeles).
+    Supports converting an existing datetime object or epoch timestamp to Pacific Time.
+    If neither is passed, returns the current Pacific datetime.
+    Accurately handles Daylight Saving Time (PDT, UTC-7) vs Standard Time (PST, UTC-8)
+    across Python 3.9+ (zoneinfo), python-dateutil, and dynamic UTC-offset fallback.
     """
+    if epoch is not None:
+        target_utc = datetime.datetime.fromtimestamp(epoch, tz=timezone.utc)
+    elif dt is not None:
+        if dt.tzinfo is None:
+            target_utc = dt.replace(tzinfo=timezone.utc)
+        else:
+            target_utc = dt.astimezone(timezone.utc)
+    else:
+        target_utc = datetime.datetime.now(timezone.utc)
+
     try:
         from zoneinfo import ZoneInfo
-        return datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
+        return target_utc.astimezone(ZoneInfo("America/Los_Angeles"))
     except Exception:
         pass
 
@@ -33,26 +45,25 @@ def get_pacific_time():
         import dateutil.tz
         tz = dateutil.tz.gettz("America/Los_Angeles")
         if tz:
-            return datetime.datetime.now(tz)
+            return target_utc.astimezone(tz)
     except Exception:
         pass
 
-    # Dynamic DST calculation for US Pacific Time:
-    # Daylight Saving Time begins the 2nd Sunday in March (2:00 AM PST -> 10:00 UTC)
-    # and ends the 1st Sunday in November (2:00 AM PDT -> 9:00 UTC).
-    now_utc = datetime.datetime.now(timezone.utc)
-    year = now_utc.year
+    # Dynamic US Pacific DST calculation:
+    # DST begins 2nd Sunday in March at 2:00 AM PST (10:00 UTC)
+    # DST ends 1st Sunday in November at 2:00 AM PDT (9:00 UTC)
+    year = target_utc.year
     mar1 = datetime.datetime(year, 3, 1, tzinfo=timezone.utc)
     dst_start = mar1 + datetime.timedelta(days=(6 - mar1.weekday() + 7) % 7 + 7, hours=10)
     nov1 = datetime.datetime(year, 11, 1, tzinfo=timezone.utc)
     dst_end = nov1 + datetime.timedelta(days=(6 - nov1.weekday()) % 7, hours=9)
 
-    if dst_start <= now_utc < dst_end:
+    if dst_start <= target_utc < dst_end:
         tz_offset = datetime.timezone(datetime.timedelta(hours=-7), name="PDT")
     else:
         tz_offset = datetime.timezone(datetime.timedelta(hours=-8), name="PST")
 
-    return now_utc.astimezone(tz_offset)
+    return target_utc.astimezone(tz_offset)
 
 
 # Ensure UTF-8 output for console logging across Windows/Linux
@@ -106,6 +117,7 @@ def parse_report_file(report_path="report.txt"):
         video_url = video_match.group(1) if video_match else ""
         t_match = re.search(r"at\s+([\d\.]+)s", content)
         timestamp_str = f"{t_match.group(1)}s" if t_match else ""
+        detection_time_str = extract_first_match(r"Detection Time \(Pacific\):\s*([^\n]+)", content)
         score_str = extract_first_match(r"Motion Score:\s*([^\n]+)", content)
         screenshots = extract_screenshots(content, area_name)
 
@@ -119,6 +131,7 @@ def parse_report_file(report_path="report.txt"):
             "top_video": f"{video_url} at {timestamp_str}" if video_url and timestamp_str else video_url,
             "video_url": video_url,
             "timestamp_str": timestamp_str,
+            "detection_time_str": detection_time_str,
             "score_str": score_str,
             "screenshots": screenshots,
             "candidates": candidates
@@ -171,7 +184,7 @@ def extract_screenshots(text, area_name):
 
 
 def build_email_content(sections, raw_text):
-    """Build dynamic subject, plain-text body, and HTML body."""
+    """Build dynamic subject, plain-text body, and HTML body with accurate Pacific Time."""
     now_pac = get_pacific_time()
     tz_abbr = now_pac.strftime("%Z") or "PDT"
     now_pac_str = now_pac.strftime(f"%Y-%m-%d %I:%M %p {tz_abbr}")
@@ -189,7 +202,7 @@ def build_email_content(sections, raw_text):
     plain_body = f"""====================================================
 TWITCH 3-HOUR MOTION CHECK REPORT
 ====================================================
-Check Time: {now_pac_str} ({now_utc})
+Check Time (PST/PDT): {now_pac_str} (UTC: {now_utc})
 Overall Status: {'🚨 MOTION / OBJECT DETECTED' if has_any_detection else '✅ ALL CLEAR - NO MOTION DETECTED'}
 Detected Areas: {', '.join(detected_areas) if detected_areas else 'None'}
 ====================================================
@@ -256,6 +269,7 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
 
         details_html = ""
         if s["detected"]:
+            event_time_row = f'<tr><td style="padding: 6px 0; color: #64748b; font-weight: 500;">Event Time (PST):</td><td style="padding: 6px 0; font-weight: bold; color: #dc2626;">{s["detection_time_str"]}</td></tr>' if s.get("detection_time_str") else ''
             details_html = f"""
             <table style="width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px;">
                 <tr>
@@ -266,6 +280,7 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
                         </a>
                     </td>
                 </tr>
+                {event_time_row}
                 <tr>
                     <td style="padding: 6px 0; color: #64748b; font-weight: 500;">Timestamp:</td>
                     <td style="padding: 6px 0; font-weight: bold; color: #dc2626;">{s['timestamp_str']}</td>
@@ -330,8 +345,8 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
         <div style="background-color: #f1f5f9; padding: 12px 20px; font-size: 13px; color: #475569; border-bottom: 1px solid #e2e8f0;">
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
-                    <td><b>Time (Pacific):</b> {now_pac_str}</td>
-                    <td style="text-align: right;"><b>UTC:</b> {now_utc}</td>
+                    <td><b>Time (Pacific / PST):</b> <span style="color: #0f172a; font-weight: 600;">{now_pac_str}</span></td>
+                    <td style="text-align: right; color: #64748b;"><b>UTC:</b> {now_utc}</td>
                 </tr>
             </table>
         </div>
@@ -347,8 +362,6 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
                 </div>
                 <pre style="margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; color: #334155; white-space: pre-wrap; word-break: break-word;">{raw_text.strip()}</pre>
             </div>
-        </div>
-
         <!-- Footer -->
         <div style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 20px; text-align: center; font-size: 12px; color: #94a3b8;">
             <p style="margin: 0;">Automated 3-Hour Surveillance Check &bull; Twitch Stream AI Monitor</p>
