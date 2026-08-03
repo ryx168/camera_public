@@ -17,23 +17,43 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 
-try:
-    from zoneinfo import ZoneInfo
-    PST_TZ = ZoneInfo("America/Los_Angeles")
-except Exception:
-    PST_TZ = datetime.timezone(datetime.timedelta(hours=-7), name="PDT")
-
-
-def get_pst_time():
-    """Get current datetime in US Pacific timezone (PST/PDT)."""
+def get_pacific_time():
+    """
+    Get current datetime in US Pacific timezone (America/Los_Angeles).
+    Handles Daylight Saving Time (PDT, UTC-7) vs Standard Time (PST, UTC-8) accurately
+    even if the OS or Python environment lacks tzdata.
+    """
     try:
         from zoneinfo import ZoneInfo
         return datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
     except Exception:
-        try:
-            return datetime.datetime.now(PST_TZ)
-        except Exception:
-            return datetime.datetime.now().astimezone()
+        pass
+
+    try:
+        import dateutil.tz
+        tz = dateutil.tz.gettz("America/Los_Angeles")
+        if tz:
+            return datetime.datetime.now(tz)
+    except Exception:
+        pass
+
+    # Dynamic DST calculation for US Pacific Time:
+    # Daylight Saving Time begins the 2nd Sunday in March (2:00 AM PST -> 10:00 UTC)
+    # and ends the 1st Sunday in November (2:00 AM PDT -> 9:00 UTC).
+    now_utc = datetime.datetime.now(timezone.utc)
+    year = now_utc.year
+    mar1 = datetime.datetime(year, 3, 1, tzinfo=timezone.utc)
+    dst_start = mar1 + datetime.timedelta(days=(6 - mar1.weekday() + 7) % 7 + 7, hours=10)
+    nov1 = datetime.datetime(year, 11, 1, tzinfo=timezone.utc)
+    dst_end = nov1 + datetime.timedelta(days=(6 - nov1.weekday()) % 7, hours=9)
+
+    if dst_start <= now_utc < dst_end:
+        tz_offset = datetime.timezone(datetime.timedelta(hours=-7), name="PDT")
+    else:
+        tz_offset = datetime.timezone(datetime.timedelta(hours=-8), name="PST")
+
+    return now_utc.astimezone(tz_offset)
+
 
 # Ensure UTF-8 output for console logging across Windows/Linux
 if hasattr(sys.stdout, 'reconfigure'):
@@ -152,24 +172,24 @@ def extract_screenshots(text, area_name):
 
 def build_email_content(sections, raw_text):
     """Build dynamic subject, plain-text body, and HTML body."""
-    now_pst = get_pst_time()
-    tz_abbr = now_pst.strftime("%Z") or "PST"
-    now_pst_str = now_pst.strftime(f"%Y-%m-%d %I:%M %p {tz_abbr}")
+    now_pac = get_pacific_time()
+    tz_abbr = now_pac.strftime("%Z") or "PDT"
+    now_pac_str = now_pac.strftime(f"%Y-%m-%d %I:%M %p {tz_abbr}")
     now_utc = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     
     detected_areas = [s["area_name"] for s in sections if s["detected"]]
     has_any_detection = len(detected_areas) > 0
 
     if has_any_detection:
-        subject = f"🚨 [MOTION DETECTED] Twitch Camera Alert ({', '.join(detected_areas)}) - {now_pst_str}"
+        subject = f"🚨 [MOTION DETECTED] Twitch Camera Alert ({', '.join(detected_areas)}) - {now_pac_str}"
     else:
-        subject = f"✅ [All Clear] Twitch Motion Check Report - {now_pst_str}"
+        subject = f"✅ [All Clear] Twitch Motion Check Report - {now_pac_str}"
 
     # Plain text version
     plain_body = f"""====================================================
 TWITCH 3-HOUR MOTION CHECK REPORT
 ====================================================
-Check Time: {now_pst_str} ({now_utc})
+Check Time: {now_pac_str} ({now_utc})
 Overall Status: {'🚨 MOTION / OBJECT DETECTED' if has_any_detection else '✅ ALL CLEAR - NO MOTION DETECTED'}
 Detected Areas: {', '.join(detected_areas) if detected_areas else 'None'}
 ====================================================
@@ -310,7 +330,7 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
         <div style="background-color: #f1f5f9; padding: 12px 20px; font-size: 13px; color: #475569; border-bottom: 1px solid #e2e8f0;">
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
-                    <td><b>Time (PST/PDT):</b> {now_pst_str}</td>
+                    <td><b>Time (Pacific):</b> {now_pac_str}</td>
                     <td style="text-align: right;"><b>UTC:</b> {now_utc}</td>
                 </tr>
             </table>

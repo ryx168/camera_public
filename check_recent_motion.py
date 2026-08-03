@@ -28,6 +28,40 @@ if hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
+
+def get_pacific_time():
+    """
+    Get current datetime in US Pacific timezone (America/Los_Angeles).
+    Handles Daylight Saving Time (PDT, UTC-7) vs Standard Time (PST, UTC-8) accurately.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        pass
+
+    try:
+        import dateutil.tz
+        tz = dateutil.tz.gettz("America/Los_Angeles")
+        if tz:
+            return datetime.datetime.now(tz)
+    except Exception:
+        pass
+
+    now_utc = datetime.datetime.now(timezone.utc)
+    year = now_utc.year
+    mar1 = datetime.datetime(year, 3, 1, tzinfo=timezone.utc)
+    dst_start = mar1 + datetime.timedelta(days=(6 - mar1.weekday() + 7) % 7 + 7, hours=10)
+    nov1 = datetime.datetime(year, 11, 1, tzinfo=timezone.utc)
+    dst_end = nov1 + datetime.timedelta(days=(6 - nov1.weekday()) % 7, hours=9)
+
+    if dst_start <= now_utc < dst_end:
+        tz_offset = datetime.timezone(datetime.timedelta(hours=-7), name="PDT")
+    else:
+        tz_offset = datetime.timezone(datetime.timedelta(hours=-8), name="PST")
+
+    return now_utc.astimezone(tz_offset)
+
 CHECK_AREA = os.environ.get('CHECK_AREA', 'house_around').lower().strip()
 TARGET_OBJECT = os.environ.get('TARGET_OBJECT', 'person')
 
@@ -430,7 +464,9 @@ def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, u
     out_dir = os.path.dirname(os.path.abspath(output_prefix))
     os.makedirs(out_dir, exist_ok=True)
 
-    now_utc_str = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now_pac = get_pacific_time()
+    tz_abbr = now_pac.strftime("%Z") or "PDT"
+    now_time_str = now_pac.strftime(f"%Y-%m-%d %I:%M:%S %p {tz_abbr}")
     phase_suffix_map = {'START': 'start', 'PEAK': 'peak', 'END': 'end'}
     saved = []
 
@@ -475,7 +511,7 @@ def annotate_and_save_snapshots(three_frames_data, area_name, target_obj, vid, u
             line1 = f"[{phase}] {cam_name.upper()} | Target: {target_obj.upper()} | Layout: {cam_count}-Cam | Frame {idx+1}/3"
             cv2.putText(frame, line1, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 235, 255), 1, cv2.LINE_AA)
 
-            line2 = f"VOD {vid} @ {t_sec:.1f}s | Motion: {motion_px:,}px | Total Movement: {total_movement_px:.1f}px | {now_utc_str}"
+            line2 = f"VOD {vid} @ {t_sec:.1f}s | Motion: {motion_px:,}px | Total Movement: {total_movement_px:.1f}px | {now_time_str}"
             cv2.putText(frame, line2, (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
 
             suffix = phase_suffix_map.get(phase, f"f{idx+1}")
