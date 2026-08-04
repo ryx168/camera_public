@@ -706,7 +706,18 @@ def fetch_recent_videos(lookback_hours=3.0, cache_dir="temp_vods"):
 
     recent_videos = []
     for v in videos:
-        epoch = v.get('epoch') or v.get('timestamp') or v.get('release_timestamp')
+        # Extract true broadcast epoch from Twitch thumbnail URL:
+        # e.g., "..._elarathornfield168_318630196567_1785176728//thumb/thumb0-320x180.jpg"
+        epoch = None
+        thumb = v.get('thumbnail') or ''
+        m = re.search(r'_(\d{9,11})//?thumb', thumb)
+        if m:
+            epoch = int(m.group(1))
+        elif v.get('timestamp'):
+            epoch = int(v['timestamp'])
+        elif v.get('release_timestamp'):
+            epoch = int(v['release_timestamp'])
+
         if epoch and epoch >= target_epoch:
             v['epoch'] = epoch
             recent_videos.append(v)
