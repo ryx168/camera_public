@@ -41,34 +41,50 @@ jobs:
           restore-keys: |
             temp-vods-
 
-      - name: Run motion check (House - Cam 2 Bottom 80%)
+      - name: Run motion check (Office - Cam 1 Person)
         timeout-minutes: 25
         env:
-          CHECK_AREA: "house_around"
+          CHECK_AREA: "office"
           TARGET_OBJECT: "person"
-          ROI_Y_MIN: "0.20"
+          ROI_Y_MIN: "0.0"
           ROI_Y_MAX: "1.0"
           ROI_X_MIN: "0.0"
           ROI_X_MAX: "1.0"
           MOTION_THRESHOLD: "25000"
-          MIN_CONFIDENCE: "0.70"
-          MIN_PERSON_HEIGHT: "110"
-          DIFF_THRESHOLD: "35"
+          MIN_CONFIDENCE: "0.50"
+          MIN_PERSON_HEIGHT: "80"
+          DIFF_THRESHOLD: "30"
+        run: python check_recent_motion.py
+
+      - name: Run motion check (House - Cam 2 Person)
+        if: always()
+        timeout-minutes: 25
+        env:
+          CHECK_AREA: "house_around"
+          TARGET_OBJECT: "person"
+          ROI_Y_MIN: "0.0"
+          ROI_Y_MAX: "1.0"
+          ROI_X_MIN: "0.0"
+          ROI_X_MAX: "1.0"
+          MOTION_THRESHOLD: "25000"
+          MIN_CONFIDENCE: "0.50"
+          MIN_PERSON_HEIGHT: "80"
+          DIFF_THRESHOLD: "30"
         run: python check_recent_motion.py
         
-      - name: Run motion check (Garage / Kitchen - Cam 3 Car & Vehicle Check)
+      - name: Run motion check (Garage / Kitchen - Cam 3 Motion)
         if: always()
         timeout-minutes: 25
         env:
           CHECK_AREA: "garage"
-          TARGET_OBJECT: "car"
-          ROI_Y_MIN: "0.20"
+          TARGET_OBJECT: "motion"
+          ROI_Y_MIN: "0.0"
           ROI_Y_MAX: "1.0"
           ROI_X_MIN: "0.0"
           ROI_X_MAX: "1.0"
-          MOTION_THRESHOLD: "2500"
-          MIN_MOVEMENT_PX: "15.0"
-          DIFF_THRESHOLD: "30"
+          MOTION_THRESHOLD: "1500"
+          MIN_MOVEMENT_PX: "8.0"
+          DIFF_THRESHOLD: "25"
         run: python check_recent_motion.py
 
       - name: Send Report Email with Detection Screenshots
