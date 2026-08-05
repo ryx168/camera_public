@@ -56,7 +56,7 @@ jobs:
           DIFF_THRESHOLD: "35"
         run: python check_recent_motion.py
         
-      - name: Run motion check (Garage - Cam 3)
+      - name: Run motion check (Garage / Kitchen - Cam 3 Car & Vehicle Check)
         if: always()
         timeout-minutes: 25
         env:
@@ -66,8 +66,9 @@ jobs:
           ROI_Y_MAX: "1.0"
           ROI_X_MIN: "0.0"
           ROI_X_MAX: "1.0"
-          MOTION_THRESHOLD: "35000"
-          DIFF_THRESHOLD: "35"
+          MOTION_THRESHOLD: "2500"
+          MIN_MOVEMENT_PX: "15.0"
+          DIFF_THRESHOLD: "30"
         run: python check_recent_motion.py
 
       - name: Send Report Email with Detection Screenshots

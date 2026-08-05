@@ -760,17 +760,21 @@ def main():
     print(f"Got {len(vod_sources)} ready video sources. Starting motion & temporal tracking for camera '{canonical_area}' (alias '{CHECK_AREA}')...")
 
     # Region of Interest (ROI) within selected camera bounds
-    default_roi_y_min = '0.20' if canonical_area == 'front' else '0.0'
+    default_roi_y_min = '0.20' if canonical_area in ['front', 'kitchen'] else '0.0'
     ROI_Y_MIN = float(os.environ.get('ROI_Y_MIN', default_roi_y_min))
     ROI_Y_MAX = float(os.environ.get('ROI_Y_MAX', '1.0'))
     ROI_X_MIN = float(os.environ.get('ROI_X_MIN', '0.0'))
     ROI_X_MAX = float(os.environ.get('ROI_X_MAX', '1.0'))
 
-    DIFF_THRESHOLD = int(os.environ.get('DIFF_THRESHOLD', '35'))
-    MOTION_THRESHOLD = int(os.environ.get('MOTION_THRESHOLD', '25000'))
+    default_diff_th = '30' if (TARGET_OBJECT == 'car' or canonical_area == 'kitchen') else '35'
+    default_motion_th = '2500' if (TARGET_OBJECT == 'car' or canonical_area == 'kitchen') else '25000'
+    default_min_move = '15.0' if (TARGET_OBJECT == 'car' or canonical_area == 'kitchen') else '25.0'
+
+    DIFF_THRESHOLD = int(os.environ.get('DIFF_THRESHOLD', default_diff_th))
+    MOTION_THRESHOLD = int(os.environ.get('MOTION_THRESHOLD', default_motion_th))
     MIN_PERSON_HEIGHT = int(os.environ.get('MIN_PERSON_HEIGHT', '100'))
     MIN_CONFIDENCE = float(os.environ.get('MIN_CONFIDENCE', '0.60'))
-    MIN_MOVEMENT_PX = float(os.environ.get('MIN_MOVEMENT_PX', '25.0'))
+    MIN_MOVEMENT_PX = float(os.environ.get('MIN_MOVEMENT_PX', default_min_move))
 
     def get_crop_and_roi(frame, camera_map=None, cam_count=None):
         bounds = get_camera_bounds(frame, canonical_area, camera_map=camera_map, cam_count=cam_count)
