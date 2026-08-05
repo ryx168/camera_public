@@ -25,3 +25,47 @@ snapshot_*.jpg
 __pycache__/
 
 
+
+# Camera analysis scratch/output folders
+car_610pm_detected/
+car_610pm_results/
+car_arrival_tracking/
+car_detailed_snapshots/
+car_drive_event/
+car_entry_events/
+car_exact_610/
+car_motion_snapshots/
+detected_car_motion/
+driveway_entries/
+driveway_inspect_6pm/
+extracted_910am/
+extracted_frames/
+final_car_snapshots/
+front_car_series/
+kitchen_cam3_inspection/
+kitchen_deep_inspect/
+kitchen_focus_events/
+kitchen_gallery_608_630/
+kitchen_red_analysis/
+kitchen_red_car_zooms/
+kitchen_timeline_608_630/
+parking_search/
+real_910am_frames/
+red_car_624pm/
+red_car_detections/
+red_car_exact_arrival/
+red_car_search/
+red_car_zooms/
+red_car_zooms_624pm/
+scratch_*/
+vehicle_highlights/
+
+# Media / large binary files
+*.mp4
+*.jpg
+*.jpeg
+*.json
+
+# Misc dumps
+scratch_610pm_videos.json
+videos.json
