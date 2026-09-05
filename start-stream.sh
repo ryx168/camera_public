@@ -20,6 +20,14 @@ declare -A CAMERA_URLS=(
 # Camera order for layout
 CAMERA_ORDER=("Office" "Front" "Kitchen" "Balcony" "Backyard")
 
+# Wyze Cam Pan v3 - native RTSPS on the camera itself (self-signed cert, digest auth).
+# Only included when WYZE_PASS is set, so the stream still runs without that secret.
+WYZE_PASS="${WYZE_PASS:-}"
+if [ -n "$WYZE_PASS" ]; then
+    CAMERA_URLS["Basement"]="rtsps://harry:${WYZE_PASS}@192.168.1.68:322/stream0"
+    CAMERA_ORDER+=("Basement")
+fi
+
 # ===== BANDWIDTH SAVING SETTINGS =====
 # Reduced from 1920x1080 to save bandwidth
 # Options: 1920x720 (original), 1280x480 (saves ~50%), 960x360 (saves ~65%), 640x240 (saves ~75%)
@@ -82,7 +90,11 @@ trap cleanup SIGTERM SIGINT SIGQUIT
 # Check camera connectivity using ffprobe (actually tests the stream)
 check_camera() {
     local url=$1
-    timeout 5 ffprobe -v quiet -analyzeduration 2000000 -probesize 2000000 \
+    local extra="" limit=5
+    case "$url" in
+        rtsp://*|rtsps://*) extra="-rtsp_transport tcp -tls_verify 0"; limit=15 ;;
+    esac
+    timeout $limit ffprobe -v quiet $extra -analyzeduration 2000000 -probesize 2000000 \
         -i "$url" -show_entries format=duration >/dev/null 2>&1
     return $?
 }
@@ -210,6 +222,36 @@ build_filter_complex() {
                     [txt4] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[4]}':x=$((half_width + 10)):y=$((half_height + 10)):fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [out]"
             ;;
+        6)
+            # Six cameras - 3 top, 3 bottom
+            local third_width=$((OUTPUT_WIDTH / 3))
+            local half_height=$((OUTPUT_HEIGHT / 2))
+            filter="[0:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam0]; \
+                    [1:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam1]; \
+                    [2:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam2]; \
+                    [3:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam3]; \
+                    [4:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam4]; \
+                    [5:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam5]; \
+                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
+                    [base][cam0] overlay=shortest=1:x=0:y=0 [tmp1]; \
+                    [tmp1][cam1] overlay=shortest=1:x=${third_width}:y=0 [tmp2]; \
+                    [tmp2][cam2] overlay=shortest=1:x=$((third_width * 2)):y=0 [tmp3]; \
+                    [tmp3][cam3] overlay=shortest=1:x=0:y=${half_height} [tmp4]; \
+                    [tmp4][cam4] overlay=shortest=1:x=${third_width}:y=${half_height} [tmp5]; \
+                    [tmp5][cam5] overlay=shortest=1:x=$((third_width * 2)):y=${half_height} [tmp6]; \
+                    [tmp6] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
+                    text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
+                    [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
+                    text='${names[1]}':x=$((third_width + 10)):y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt2]; \
+                    [txt2] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
+                    text='${names[2]}':x=$((third_width * 2 + 10)):y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt3]; \
+                    [txt3] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
+                    text='${names[3]}':x=10:y=$((half_height + 10)):fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt4]; \
+                    [txt4] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
+                    text='${names[4]}':x=$((third_width + 10)):y=$((half_height + 10)):fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt5]; \
+                    [txt5] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
+                    text='${names[5]}':x=$((third_width * 2 + 10)):y=$((half_height + 10)):fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [out]"
+            ;;
         *)
             echo "$(date) - ❌ 错误: 不支持的摄像头数量: $count" | tee -a "$LOG_FILE"
             return 1
@@ -300,7 +342,11 @@ start_ffmpeg() {
         # Build input arguments
         local input_args=""
         for url in "${ONLINE_CAMERA_URLS[@]}"; do
-            input_args="$input_args -thread_queue_size 1024 -analyzeduration 5000000 -probesize 5000000 -fflags +genpts -use_wallclock_as_timestamps 1 -timeout 10000000 -i $url"
+            local url_opts=""
+            case "$url" in
+                rtsp://*|rtsps://*) url_opts="-rtsp_transport tcp -tls_verify 0" ;;
+            esac
+            input_args="$input_args -thread_queue_size 1024 -analyzeduration 5000000 -probesize 5000000 -fflags +genpts -use_wallclock_as_timestamps 1 -timeout 10000000 $url_opts -i $url"
         done
 
         # Build filter complex

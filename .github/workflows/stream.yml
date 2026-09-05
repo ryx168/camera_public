@@ -100,21 +100,28 @@ jobs:
       - name: Test Camera Access
         env:
           CAM_PASS: ${{ secrets.CAM_PASS }}
+          WYZE_PASS: ${{ secrets.WYZE_PASS }}
         run: |
           echo "🔍 Testing camera connectivity..."
           
           declare -A CAMERAS=(
               ["Office"]="http://192.168.1.31/video.cgi"
-              ["Front"]="http://admin:${CAMERA_PASSWORD}@192.168.1.38/video.cgi"
-              ["Kitchen"]="http://admin:${CAMERA_PASSWORD}@192.168.1.33/video.cgi"
-              ["Balcony"]="http://admin:${CAMERA_PASSWORD}@192.168.1.35/video.cgi"
-              ["Backyard"]="http://admin:${CAMERA_PASSWORD}@192.168.1.39/video.cgi"
+              ["Front"]="http://admin:${CAM_PASS}@192.168.1.38/video.cgi"
+              ["Kitchen"]="http://admin:${CAM_PASS}@192.168.1.33/video.cgi"
+              ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.35/video.cgi"
+              ["Backyard"]="http://admin:${CAM_PASS}@192.168.1.39/video.cgi"
+              ["Basement"]="rtsps://harry:${WYZE_PASS}@192.168.1.68:322/stream0"
           )
           
           ONLINE_COUNT=0
-          for name in Office Front Kitchen Balcony Backyard; do
+          for name in Office Front Kitchen Balcony Backyard Basement; do
               url="${CAMERAS[$name]}"
-              if timeout 8 curl -s -I "$url" > /dev/null 2>&1; then
+              [ -z "$url" ] && { echo "⚠️  $name skipped (no URL / secret unset)"; continue; }
+              case "$url" in
+                  rtsp://*|rtsps://*) probe=(timeout 20 ffmpeg -v error -rtsp_transport tcp -tls_verify 0 -i "$url" -t 1 -f null -) ;;
+                  *)                  probe=(timeout 8 curl -s -I "$url") ;;
+              esac
+              if "${probe[@]}" > /dev/null 2>&1; then
                   echo "✅ $name camera is online"
                   ONLINE_COUNT=$((ONLINE_COUNT + 1))
               else
@@ -130,6 +137,7 @@ jobs:
         env:
           TWITCH_KEY: ${{ secrets.TWITCH_KEY }}
           CAM_PASS: ${{ secrets.CAM_PASS }}
+          WYZE_PASS: ${{ secrets.WYZE_PASS }}
         run: |
           chmod +x start-stream.sh twitch.sh
 
