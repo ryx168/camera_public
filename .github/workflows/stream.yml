@@ -41,13 +41,17 @@ jobs:
           echo ""
           echo "🔍 Testing QNAP connectivity..."
           
-          QNAP_IP="100.81.101.86"
+          PRIMARY_QNAP="100.81.101.86"   # NAS61536A  (subnet router, primary)
+          FAILOVER_QNAP="100.73.152.14"  # NASF604EB  (subnet router, standby)
           
-          if ping -c 3 $QNAP_IP > /dev/null 2>&1; then
-            echo "✅ QNAP reachable at $QNAP_IP"
-            echo "QNAP_IP=$QNAP_IP" >> $GITHUB_ENV
+          if ping -c 3 $PRIMARY_QNAP > /dev/null 2>&1; then
+            echo "✅ Primary QNAP reachable ($PRIMARY_QNAP)"
+            echo "QNAP_IP=$PRIMARY_QNAP" >> $GITHUB_ENV
+          elif ping -c 3 $FAILOVER_QNAP > /dev/null 2>&1; then
+            echo "⚠️ Primary down, using failover QNAP ($FAILOVER_QNAP)"
+            echo "QNAP_IP=$FAILOVER_QNAP" >> $GITHUB_ENV
           else
-            echo "❌ QNAP unreachable at $QNAP_IP"
+            echo "❌ Both QNAPs unreachable"
             exit 1
           fi
       
