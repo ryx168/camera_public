@@ -69,3 +69,6 @@ vehicle_highlights/
 # Misc dumps
 scratch_610pm_videos.json
 videos.json
+
+# Runtime capture output (start-stream.sh / twitch.sh)
+recordings/

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Configuration
-RECORDINGS_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
+RECORDINGS_DIR="${GITHUB_WORKSPACE:-$(pwd)}/recordings"
 OUTPUT_DIR="$RECORDINGS_DIR/streaming"
 OUTPUT_FILE="$OUTPUT_DIR/combined_output.mp4"
 LIST_FILE="$RECORDINGS_DIR/concat_list.txt"

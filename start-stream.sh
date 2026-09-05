@@ -3,7 +3,7 @@ export TZ="America/Vancouver"
 
 TWITCH_URL="rtmp://live.twitch.tv/app/$TWITCH_KEY"
 LOG_FILE="logs/stream.log"
-LOCAL_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
+LOCAL_DIR="${GITHUB_WORKSPACE:-$(pwd)}/recordings"
 DEBUG_LOG="$LOCAL_DIR/logs/ffmpeg-debug.log"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
