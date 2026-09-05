@@ -118,7 +118,7 @@ jobs:
               url="${CAMERAS[$name]}"
               [ -z "$url" ] && { echo "⚠️  $name skipped (no URL / secret unset)"; continue; }
               case "$url" in
-                  rtsp://*|rtsps://*) probe=(timeout 30 ffmpeg -v error -rtsp_transport tcp -tls_verify 0 -i "$url" -t 1 -f null -) ;;
+                  rtsp://*|rtsps://*) probe=(timeout 30 ffmpeg -v error -rtsp_transport tcp -i "$url" -t 1 -f null -) ;;
                   *)                  probe=(timeout 8 curl -s -I "$url") ;;
               esac
               if out=$("${probe[@]}" 2>&1); then

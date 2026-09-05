@@ -92,7 +92,7 @@ check_camera() {
     local url=$1
     local extra="" limit=5
     case "$url" in
-        rtsp://*|rtsps://*) extra="-rtsp_transport tcp -tls_verify 0"; limit=15 ;;
+        rtsp://*|rtsps://*) extra="-rtsp_transport tcp"; limit=15 ;;
     esac
     timeout $limit ffprobe -v quiet $extra -analyzeduration 2000000 -probesize 2000000 \
         -i "$url" -show_entries format=duration >/dev/null 2>&1
@@ -344,7 +344,7 @@ start_ffmpeg() {
         for url in "${ONLINE_CAMERA_URLS[@]}"; do
             local url_opts=""
             case "$url" in
-                rtsp://*|rtsps://*) url_opts="-rtsp_transport tcp -tls_verify 0" ;;
+                rtsp://*|rtsps://*) url_opts="-rtsp_transport tcp" ;;
             esac
             input_args="$input_args -thread_queue_size 1024 -analyzeduration 5000000 -probesize 5000000 -fflags +genpts -use_wallclock_as_timestamps 1 -timeout 10000000 $url_opts -i $url"
         done
