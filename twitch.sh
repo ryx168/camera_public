@@ -1,7 +1,7 @@
 #!/bin/bash
 # Configuration
-RECORDINGS_DIR="/home/runner/work/camera/camera"
-OUTPUT_DIR="/home/runner/work/camera/camera/streaming"
+RECORDINGS_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
+OUTPUT_DIR="$RECORDINGS_DIR/streaming"
 OUTPUT_FILE="$OUTPUT_DIR/combined_output.mp4"
 LIST_FILE="$RECORDINGS_DIR/concat_list.txt"
 STREAM_URL="rtmp://live.twitch.tv/app/${TWITCH_KEY}"

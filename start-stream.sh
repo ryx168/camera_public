@@ -3,8 +3,8 @@ export TZ="America/Vancouver"
 
 TWITCH_URL="rtmp://live.twitch.tv/app/$TWITCH_KEY"
 LOG_FILE="logs/stream.log"
-DEBUG_LOG="/home/runner/work/camera/camera/logs/ffmpeg-debug.log"
-LOCAL_DIR="/home/runner/work/camera/camera"
+LOCAL_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
+DEBUG_LOG="$LOCAL_DIR/logs/ffmpeg-debug.log"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Camera URLs — password from CAM_PASS secret
