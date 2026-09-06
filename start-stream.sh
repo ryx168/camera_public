@@ -90,7 +90,7 @@ trap cleanup SIGTERM SIGINT SIGQUIT
 # Check camera connectivity using ffprobe (actually tests the stream)
 check_camera() {
     local url=$1
-    local extra="" limit=5
+    local extra="" limit=12
     case "$url" in
         rtsp://*|rtsps://*) extra="-rtsp_transport tcp"; limit=15 ;;
     esac

@@ -5,6 +5,13 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+# One live stream at a time: the job may run 6h and the cron fires every 6h,
+# so without this a scheduled run overlaps the previous one and both push to
+# the same Twitch ingest.
+concurrency:
+  group: camera-stream
+  cancel-in-progress: true
+
 jobs:
   stream:
     runs-on: ubuntu-latest
