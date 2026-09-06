@@ -119,6 +119,11 @@ def parse_report_file(report_path="report.txt"):
         timestamp_str = f"{t_match.group(1)}s" if t_match else ""
         detection_time_str = extract_first_match(r"Detection Time \(Pacific\):\s*([^\n]+)", content)
         score_str = extract_first_match(r"Motion Score:\s*([^\n]+)", content)
+        status = extract_first_match(r"Status:\s*(\w+)", content)
+        scanned = extract_first_match(r"Videos scanned:\s*(\d+)", content)
+        covers = extract_first_match(r"Footage covers:\s*([^\n]+)", content)
+        if not status:
+            status = "FOUND" if detected else ("NO_FOOTAGE" if "no videos in the last" in content else "CLEAR")
         screenshots = extract_screenshots(content, area_name)
 
         candidates = extract_candidates(content)
@@ -133,6 +138,9 @@ def parse_report_file(report_path="report.txt"):
             "timestamp_str": timestamp_str,
             "detection_time_str": detection_time_str,
             "score_str": score_str,
+            "status": status,
+            "scanned": scanned,
+            "covers": covers,
             "screenshots": screenshots,
             "candidates": candidates
         })
@@ -192,19 +200,24 @@ def build_email_content(sections, raw_text):
     
     detected_areas = [s["area_name"] for s in sections if s["detected"]]
     has_any_detection = len(detected_areas) > 0
+    unchecked_areas = [s["area_name"] for s in sections if s.get("status") == "NO_FOOTAGE"]
+    checked_areas = [s["area_name"] for s in sections if s.get("status") == "CLEAR"]
+    has_unchecked = len(unchecked_areas) > 0
 
     if has_any_detection:
         subject = f"🚨 [MOTION DETECTED] Twitch Camera Alert ({', '.join(detected_areas)}) - {now_pac_str}"
     else:
-        subject = f"✅ [All Clear] Twitch Motion Check Report - {now_pac_str}"
+        subject = f"⚠️ [Partial] Motion Check - {len(unchecked_areas)} of {len(sections)} cameras had NO footage - {now_pac_str}" if has_unchecked else f"✅ [All Clear] Twitch Motion Check Report - {now_pac_str}"
 
     # Plain text version
     plain_body = f"""====================================================
 TWITCH 3-HOUR MOTION CHECK REPORT
 ====================================================
 Check Time (PST/PDT): {now_pac_str} (UTC: {now_utc})
-Overall Status: {'🚨 MOTION / OBJECT DETECTED' if has_any_detection else '✅ ALL CLEAR - NO MOTION DETECTED'}
+Overall Status: {'🚨 MOTION / OBJECT DETECTED' if has_any_detection else ('⚠️ PARTIAL - SOME CAMERAS HAD NO FOOTAGE' if has_unchecked else '✅ ALL CLEAR - NO MOTION DETECTED')}
 Detected Areas: {', '.join(detected_areas) if detected_areas else 'None'}
+Cameras Checked: {len(sections) - len(unchecked_areas)} of {len(sections)}
+Not Checked (no footage): {', '.join(unchecked_areas) if unchecked_areas else 'None'}
 ====================================================
 
 {raw_text}
@@ -214,10 +227,10 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
 """
 
     # HTML version
-    header_gradient = "linear-gradient(135deg, #dc2626 0%, #991b1b 100%)" if has_any_detection else "linear-gradient(135deg, #059669 0%, #047857 100%)"
-    status_icon = "🚨" if has_any_detection else "✅"
-    status_title = "Motion Detected Alert" if has_any_detection else "All Clear - No Motion Detected"
-    status_subtitle = f"Activity detected in <b>{', '.join(detected_areas)}</b> in the last 3 hours" if has_any_detection else "No significant motion or target objects detected in the last 3 hours"
+    header_gradient = "linear-gradient(135deg, #dc2626 0%, #991b1b 100%)" if has_any_detection else ("linear-gradient(135deg, #d97706 0%, #b45309 100%)" if has_unchecked else "linear-gradient(135deg, #059669 0%, #047857 100%)")
+    status_icon = "🚨" if has_any_detection else ("⚠️" if has_unchecked else "✅")
+    status_title = "Motion Detected Alert" if has_any_detection else ("Partial Check - Missing Footage" if has_unchecked else "All Clear - No Motion Detected")
+    status_subtitle = (f"Activity detected in <b>{', '.join(detected_areas)}</b> in the last 3 hours" if has_any_detection else (f"<b>{len(unchecked_areas)} of {len(sections)}</b> cameras had no footage to examine: <b>{', '.join(unchecked_areas)}</b> - these were NOT checked" if has_unchecked else "All cameras checked - no significant motion or target objects detected"))
 
     # Build section cards HTML
     section_cards_html = ""
@@ -230,11 +243,16 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
             badge_bg = "#fee2e2"
             badge_color = "#991b1b"
             badge_text = "🚨 OBJECT DETECTED"
+        elif s.get("status") == "NO_FOOTAGE":
+            card_border = "#f59e0b"
+            badge_bg = "#fef3c7"
+            badge_color = "#92400e"
+            badge_text = "⚠️ NOT CHECKED - NO FOOTAGE"
         else:
             card_border = "#e2e8f0"
             badge_bg = "#ecfdf5"
             badge_color = "#065f46"
-            badge_text = "✅ ALL CLEAR"
+            badge_text = "✅ CHECKED - ALL CLEAR"
 
         shot_html = ""
         if s["detected"] and s.get("screenshots"):

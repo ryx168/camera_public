@@ -737,7 +737,10 @@ def main():
         print(f"No videos found in the last {lookback_hours:.1f} hours ({now_pac_str}). Exiting.")
         with open("report.txt", "a", encoding="utf-8") as f:
             f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
-            f.write(f"Check Time (Pacific / PST): {now_pac_str}\n")
+            f.write(f"Check Time (Pacific): {now_pac_str}\n")
+            f.write("Status: NO_FOOTAGE\n")
+            f.write(f"Window: last {lookback_hours:.1f} hours\n")
+            f.write("Videos scanned: 0\n")
             f.write(f"no videos in the last {lookback_hours:.1f} hours\n\n")
         exit(0)
 
@@ -975,7 +978,16 @@ def main():
 
     with open("report.txt", "a", encoding="utf-8") as f:
         f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
-        f.write(f"Check Time (Pacific / PST): {now_pac_str}\n")
+        f.write(f"Check Time (Pacific): {now_pac_str}\n")
+        f.write("Status: FOUND\n" if verified_video_events else "Status: CLEAR\n")
+        f.write(f"Window: last {lookback_hours:.1f} hours\n")
+        f.write(f"Videos scanned: {len(recent_videos)}\n")
+        _eps = [v.get("epoch") for v in recent_videos if v.get("epoch")]
+        if _eps:
+            _c0 = get_pacific_time(epoch=min(_eps)).strftime("%I:%M %p")
+            _c1 = get_pacific_time(epoch=max(_eps))
+            _tz = _c1.strftime("%Z") or "PDT"
+            f.write(f"Footage covers: {_c0} - {_c1.strftime('%I:%M %p')} {_tz}\n")
         if verified_video_events:
             top_event = verified_video_events[0]
             vod_epoch = top_event.get('epoch')
