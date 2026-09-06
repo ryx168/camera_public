@@ -104,7 +104,8 @@ KNOWN_CAMERAS = {
     'front': ['front', 'fron', 'ront'],
     'kitchen': ['kitchen', 'kichen', 'kitch', 'itchen', 'chen'],
     'balcony': ['balcony', 'balc', 'alcony', 'cony'],
-    'backyard': ['backyard', 'back', 'yard', 'ackyard', 'kyard']
+    'backyard': ['backyard', 'back', 'yard', 'ackyard', 'kyard'],
+    'basement': ['basement', 'base', 'ement', 'asement', 'sement']
 }
 
 # Alias mapping from check_area / env vars to canonical camera names
@@ -113,7 +114,8 @@ ALIAS_TO_CANONICAL = {
     'front': 'front', 'cam2': 'front', 'house_around': 'front', 'door': 'front', 'house': 'front',
     'kitchen': 'kitchen', 'kichen': 'kitchen', 'garage': 'kitchen', 'cam3': 'kitchen', 'car': 'kitchen', 'driveway': 'kitchen',
     'balcony': 'balcony', 'cam4': 'balcony',
-    'backyard': 'backyard', 'cam5': 'backyard', 'yard': 'backyard'
+    'backyard': 'backyard', 'cam5': 'backyard', 'yard': 'backyard',
+    'basement': 'basement', 'cam6': 'basement', 'wyze': 'basement'
 }
 
 
@@ -167,6 +169,14 @@ def detect_cameras_from_frame(frame):
 
     # Candidate layout definitions: list of (slot_name, (x1, y1, x2, y2))
     layout_candidates = {
+        6: [
+            ('top_left', (0, 0, w3, h2)),
+            ('top_mid', (w3, 0, 2*w3, h2)),
+            ('top_right', (2*w3, 0, w, h2)),
+            ('bot_left', (0, h2, w3, h)),
+            ('bot_mid', (w3, h2, 2*w3, h)),
+            ('bot_right', (2*w3, h2, w, h)),
+        ],
         5: [
             ('top_left', (0, 0, w3, h2)),
             ('top_mid', (w3, 0, 2*w3, h2)),
@@ -200,7 +210,7 @@ def detect_cameras_from_frame(frame):
     best_ratio = 0.0
 
     # Test candidate layouts from 5 down to 1
-    for num_cams in [5, 4, 3, 2, 1]:
+    for num_cams in [6, 5, 4, 3, 2, 1]:
         slots = layout_candidates[num_cams]
         curr_map = {}
         for _, (x1, y1, x2, y2) in slots:
@@ -316,7 +326,7 @@ def is_multicam_grid(frame):
     Returns True if the frame is a multi-camera grid layout (5, 4, or 3 cameras), False otherwise.
     """
     layout = detect_camera_layout(frame)
-    return layout in [5, 4, 3]
+    return layout in [6, 5, 4, 3]
 
 
 def get_camera_bounds(frame, area_name, camera_map=None, cam_count=None):
@@ -337,6 +347,16 @@ def get_camera_bounds(frame, area_name, camera_map=None, cam_count=None):
     # 2. Geometric / Grid mapping fallback
     if cam_count is None:
         cam_count = detect_camera_layout(frame)
+
+    if cam_count == 6:
+        # 3x2 grid, matching build_filter_complex case 6) in start-stream.sh
+        w3 = w // 3
+        h2 = h // 2
+        slots6 = {
+            'office': (0, 0, w3, h2), 'front': (w3, 0, 2*w3, h2), 'kitchen': (2*w3, 0, w, h2),
+            'balcony': (0, h2, w3, h), 'backyard': (w3, h2, 2*w3, h), 'basement': (2*w3, h2, w, h),
+        }
+        return slots6.get(canonical)
 
     if cam_count == 5:
         if canonical == 'office':
@@ -814,7 +834,7 @@ def main():
 
         # Step 1: Detect initial camera layout and matching camera corner text
         init_cam_map, init_cam_count, init_layout = detect_cameras_from_frame(prev_frame)
-        if init_cam_count not in [5, 4, 3, 2, 1]:
+        if init_cam_count not in [6, 5, 4, 3, 2, 1]:
             print(f"Skipping {vid}: Detected {init_cam_count} cameras (not a supported layout).")
             cap.release()
             continue
@@ -846,7 +866,7 @@ def main():
 
             # Step 2: Detect camera layout & corner text of current screen
             curr_cam_map, curr_cam_count, curr_layout = detect_cameras_from_frame(frame)
-            if curr_cam_count not in [5, 4, 3, 2, 1]:
+            if curr_cam_count not in [6, 5, 4, 3, 2, 1]:
                 prev_gray = None
                 prev_cam_count = None
                 prev_slot = None
