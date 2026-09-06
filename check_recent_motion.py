@@ -996,6 +996,35 @@ def main():
             print(f"ERROR: annotate_and_save_snapshots failed entirely: {e}")
             saved_snapshots = []
 
+    # When nothing was detected, still save one frame from the newest VOD so the
+    # email shows what the camera was actually looking at during the window.
+    reference_path = None
+    if not verified_video_events:
+        try:
+            _newest, _newest_ep = None, None
+            for _vid in ids:
+                _ep = vid_epoch_map.get(_vid)
+                if _vid in vod_sources and _ep and (_newest_ep is None or _ep > _newest_ep):
+                    _newest, _newest_ep = _vid, _ep
+            if _newest:
+                _url, _src = vod_sources[_newest]
+                _cap = cv2.VideoCapture(_src)
+                if _cap.isOpened():
+                    _total = int(_cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                    if _total > 2:
+                        _cap.set(cv2.CAP_PROP_POS_FRAMES, _total // 2)
+                    _ok, _frm = _cap.read()
+                    if _ok and _frm is not None:
+                        _cm, _cc, _ = detect_cameras_from_frame(_frm)
+                        _crop, _, _ = get_crop_and_roi(_frm, camera_map=_cm, cam_count=_cc)
+                        if _crop is not None and _crop.size > 0:
+                            reference_path = f"snapshot_{CHECK_AREA}_reference.jpg"
+                            cv2.imwrite(reference_path, _crop)
+                            print(f"Saved reference frame: {reference_path}")
+                    _cap.release()
+        except Exception as _e:
+            print(f"Reference frame capture failed (non-fatal): {_e}")
+
     with open("report.txt", "a", encoding="utf-8") as f:
         f.write(f"=== Report for {CHECK_AREA} ({TARGET_OBJECT}) ===\n")
         f.write(f"Check Time (Pacific): {now_pac_str}\n")
@@ -1036,6 +1065,8 @@ def main():
                     f.write(f"Rank {i+1}: {ev['url']} at {ev['time_peak']:.1f}s (Movement: {ev['movement']:.1f}px, Score: {ev['score']})\n")
         else:
             f.write("no find\n")
+            if reference_path:
+                f.write(f"Reference frame: {reference_path}\n")
         f.write("\n")
 
     print("Report generated.")

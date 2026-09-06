@@ -122,6 +122,7 @@ def parse_report_file(report_path="report.txt"):
         status = extract_first_match(r"Status:\s*(\w+)", content)
         scanned = extract_first_match(r"Videos scanned:\s*(\d+)", content)
         covers = extract_first_match(r"Footage covers:\s*([^\n]+)", content)
+        reference = extract_first_match(r"Reference frame:\s*([^\n]+)", content)
         if not status:
             status = "FOUND" if detected else ("NO_FOOTAGE" if "no videos in the last" in content else "CLEAR")
         screenshots = extract_screenshots(content, area_name)
@@ -141,6 +142,7 @@ def parse_report_file(report_path="report.txt"):
             "status": status,
             "scanned": scanned,
             "covers": covers,
+            "reference": reference,
             "screenshots": screenshots,
             "candidates": candidates
         })
@@ -255,6 +257,19 @@ Automated notification from GitHub Actions 3-Hour Surveillance Workflow.
             badge_text = "✅ CHECKED - ALL CLEAR"
 
         shot_html = ""
+        if not s["detected"] and s.get("reference") and os.path.exists(s["reference"].strip()):
+            ref_name = Path(s["reference"].strip()).name
+            shot_html = f"""
+            <div style="margin-top: 16px; background: #0f172a; padding: 12px; border-radius: 8px;">
+                <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">
+                    📷 Reference frame from the footage checked
+                </div>
+                <img src="cid:{ref_name}" alt="{area_title} reference frame" style="width: 100%; height: auto; border-radius: 6px; border: 1px solid #334155; display: block;" />
+                <div style="margin-top: 8px; font-size: 11px; color: #64748b; text-align: center;">
+                    {s.get("scanned") or "0"} video(s) scanned{" - " + s["covers"] if s.get("covers") else ""}
+                </div>
+            </div>
+            """
         if s["detected"] and s.get("screenshots"):
             shot_cells = ""
             for shot in s["screenshots"]:
