@@ -24,7 +24,7 @@ CAMERA_ORDER=("Office" "Front" "Kitchen" "Balcony" "Backyard")
 # Only included when WYZE_PASS is set, so the stream still runs without that secret.
 WYZE_PASS="${WYZE_PASS:-}"
 if [ -n "$WYZE_PASS" ]; then
-    CAMERA_URLS["Basement"]="rtsps://harry:${WYZE_PASS}@192.168.1.68:322/stream0"
+    CAMERA_URLS["Basement"]="rtsps://harry:${WYZE_PASS}@192.168.1.64:322/stream0"
     CAMERA_ORDER+=("Basement")
 fi
 
