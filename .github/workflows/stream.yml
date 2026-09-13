@@ -117,11 +117,11 @@ jobs:
               ["Kitchen"]="http://admin:${CAM_PASS}@192.168.1.33/video.cgi"
               ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.35/video.cgi"
               ["Backyard"]="http://admin:${CAM_PASS}@192.168.1.39/video.cgi"
-              ["Basement"]="rtsps://harry:${WYZE_PASS}@192.168.1.64:322/stream0"
+              ["Control Room"]="rtsps://harry:${WYZE_PASS}@192.168.1.64:322/stream0"
           )
           
           ONLINE_COUNT=0
-          for name in Office Front Kitchen Balcony Backyard Basement; do
+          for name in Office Front Kitchen Balcony Backyard "Control Room"; do
               url="${CAMERAS[$name]}"
               [ -z "$url" ] && { echo "⚠️  $name skipped (no URL / secret unset)"; continue; }
               case "$url" in
