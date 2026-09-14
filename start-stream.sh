@@ -188,8 +188,8 @@ build_filter_complex() {
             filter="[0:v] setpts=PTS-STARTPTS, scale=${half_width}:${OUTPUT_HEIGHT}:flags=fast_bilinear [cam0]; \
                     [1:v] setpts=PTS-STARTPTS, scale=${half_width}:${OUTPUT_HEIGHT}:flags=fast_bilinear [cam1]; \
                     nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
-                    [base][cam0] overlay=shortest=1:x=0:y=0 [tmp1]; \
-                    [tmp1][cam1] overlay=shortest=1:x=${half_width}:y=0 [tmp2]; \
+                    [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
+                    [tmp1][cam1] overlay=eof_action=repeat:x=${half_width}:y=0 [tmp2]; \
                     [tmp2] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
@@ -203,9 +203,9 @@ build_filter_complex() {
                     [1:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam1]; \
                     [2:v] setpts=PTS-STARTPTS, scale=${OUTPUT_WIDTH}:${half_height}:flags=fast_bilinear [cam2]; \
                     nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
-                    [base][cam0] overlay=shortest=1:x=0:y=0 [tmp1]; \
-                    [tmp1][cam1] overlay=shortest=1:x=${half_width}:y=0 [tmp2]; \
-                    [tmp2][cam2] overlay=shortest=1:x=0:y=${half_height} [tmp3]; \
+                    [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
+                    [tmp1][cam1] overlay=eof_action=repeat:x=${half_width}:y=0 [tmp2]; \
+                    [tmp2][cam2] overlay=eof_action=repeat:x=0:y=${half_height} [tmp3]; \
                     [tmp3] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
@@ -222,10 +222,10 @@ build_filter_complex() {
                     [2:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam2]; \
                     [3:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam3]; \
                     nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
-                    [base][cam0] overlay=shortest=1:x=0:y=0 [tmp1]; \
-                    [tmp1][cam1] overlay=shortest=1:x=${half_width}:y=0 [tmp2]; \
-                    [tmp2][cam2] overlay=shortest=1:x=0:y=${half_height} [tmp3]; \
-                    [tmp3][cam3] overlay=shortest=1:x=${half_width}:y=${half_height} [tmp4]; \
+                    [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
+                    [tmp1][cam1] overlay=eof_action=repeat:x=${half_width}:y=0 [tmp2]; \
+                    [tmp2][cam2] overlay=eof_action=repeat:x=0:y=${half_height} [tmp3]; \
+                    [tmp3][cam3] overlay=eof_action=repeat:x=${half_width}:y=${half_height} [tmp4]; \
                     [tmp4] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
@@ -246,11 +246,11 @@ build_filter_complex() {
                     [3:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam3]; \
                     [4:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam4]; \
                     nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
-                    [base][cam0] overlay=shortest=1:x=0:y=0 [tmp1]; \
-                    [tmp1][cam1] overlay=shortest=1:x=${third_width}:y=0 [tmp2]; \
-                    [tmp2][cam2] overlay=shortest=1:x=$((third_width * 2)):y=0 [tmp3]; \
-                    [tmp3][cam3] overlay=shortest=1:x=0:y=${half_height} [tmp4]; \
-                    [tmp4][cam4] overlay=shortest=1:x=${half_width}:y=${half_height} [tmp5]; \
+                    [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
+                    [tmp1][cam1] overlay=eof_action=repeat:x=${third_width}:y=0 [tmp2]; \
+                    [tmp2][cam2] overlay=eof_action=repeat:x=$((third_width * 2)):y=0 [tmp3]; \
+                    [tmp3][cam3] overlay=eof_action=repeat:x=0:y=${half_height} [tmp4]; \
+                    [tmp4][cam4] overlay=eof_action=repeat:x=${half_width}:y=${half_height} [tmp5]; \
                     [tmp5] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
@@ -273,12 +273,12 @@ build_filter_complex() {
                     [4:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam4]; \
                     [5:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam5]; \
                     nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
-                    [base][cam0] overlay=shortest=1:x=0:y=0 [tmp1]; \
-                    [tmp1][cam1] overlay=shortest=1:x=${third_width}:y=0 [tmp2]; \
-                    [tmp2][cam2] overlay=shortest=1:x=$((third_width * 2)):y=0 [tmp3]; \
-                    [tmp3][cam3] overlay=shortest=1:x=0:y=${half_height} [tmp4]; \
-                    [tmp4][cam4] overlay=shortest=1:x=${third_width}:y=${half_height} [tmp5]; \
-                    [tmp5][cam5] overlay=shortest=1:x=$((third_width * 2)):y=${half_height} [tmp6]; \
+                    [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
+                    [tmp1][cam1] overlay=eof_action=repeat:x=${third_width}:y=0 [tmp2]; \
+                    [tmp2][cam2] overlay=eof_action=repeat:x=$((third_width * 2)):y=0 [tmp3]; \
+                    [tmp3][cam3] overlay=eof_action=repeat:x=0:y=${half_height} [tmp4]; \
+                    [tmp4][cam4] overlay=eof_action=repeat:x=${third_width}:y=${half_height} [tmp5]; \
+                    [tmp5][cam5] overlay=eof_action=repeat:x=$((third_width * 2)):y=${half_height} [tmp6]; \
                     [tmp6] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [txt1]; \
                     [txt1] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
