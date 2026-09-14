@@ -129,13 +129,7 @@ cleanup_old_files() {
 }
 
 get_file_count() {
-    # Counts segments still being recorded (*.mp4.part) as well as finished
-    # ones. This is the liveness signal, not the combine list: a .part file
-    # means the recorder is alive and mid-segment. Counting only finished files
-    # would read zero for the first 60s of a segment, and with a 45s no-files
-    # threshold that restarts the recorder 15s before it produces its first
-    # file - forever. Only finished *.mp4 files are ever combined.
-    find "$RECORDINGS_DIR" -maxdepth 1 -type f \( -name "*.mp4" -o -name "*.mp4.part" \) 2>/dev/null | wc -l
+    find "$RECORDINGS_DIR" -maxdepth 1 -type f -name "*.mp4" 2>/dev/null | wc -l
 }
 
 monitor_files() {
