@@ -60,6 +60,9 @@ MAX_SPACE_GB=${MAX_SPACE_GB:-5}
 MAX_RETRY_COUNT=${MAX_RETRY_COUNT:-3}
 FFMPEG_TIMEOUT=${FFMPEG_TIMEOUT:-120}
 SEGMENT_DURATION=${SEGMENT_DURATION:-60}
+# Marker for a camera that failed its probe. Its pane is still
+# composited, fed by a placeholder, so the grid never reshuffles.
+OFFLINE_PLACEHOLDER="__offline__"
 HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-30}
 
 # PID file
@@ -96,14 +99,15 @@ check_camera() {
     esac
     # The cameras sit on a 2.4GHz band currently losing about a third of
     # packets, so a single probe wrongly marks a healthy camera offline about
-    # that often - and because the camera list is fixed when the stream starts,
-    # one unlucky probe drops that camera for the whole multi-hour run.
-    local tries=${CAMERA_PROBE_TRIES:-3} i
+    # that often. This runs before every 60s segment, so the retry is kept
+    # cheap: a missed probe now only costs one segment of placeholder, because
+    # the pane is preserved either way and the camera rejoins next cycle.
+    local tries=${CAMERA_PROBE_TRIES:-2} i
     for i in $(seq 1 "$tries"); do
         if timeout $limit ffprobe -v quiet $extra -analyzeduration 2000000 -probesize 2000000             -i "$url" -show_entries format=duration >/dev/null 2>&1; then
             return 0
         fi
-        [ "$i" -lt "$tries" ] && sleep 2
+        [ "$i" -lt "$tries" ] && sleep 1
     done
     return 1
 }
@@ -111,7 +115,7 @@ check_camera() {
 
 # Get online cameras
 get_online_cameras() {
-    local -a online=()
+    local -a urls=()
     local -a names=()
 
     echo "$(date) - 检查摄像头连接状态..." | tee -a "$LOG_FILE"
@@ -119,20 +123,26 @@ get_online_cameras() {
     for name in "${CAMERA_ORDER[@]}"; do
         local url="${CAMERA_URLS[$name]}"
         if check_camera "$url"; then
-            echo "$(date) - ✅ 摄像头 $name ($url) 连接正常" | tee -a "$LOG_FILE"
-            online+=("$url")
-            names+=("$name")
+            echo "$(date) - ✅ 摄像头 $name 连接正常" | tee -a "$LOG_FILE"
+            urls+=("$url")
         else
-            echo "$(date) - ⚠️  摄像头 $name ($url) 离线 - 跳过" | tee -a "$LOG_FILE"
+            # Keep the pane rather than dropping the camera. Removing one
+            # renumbers every pane after it and switches the whole mosaic to a
+            # different layout, so a camera blinking out silently changes which
+            # camera each position belongs to - and the archive then attributes
+            # motion to the wrong camera for that whole run.
+            echo "$(date) - ⚠️  摄像头 $name 离线 - 保留画面位置" | tee -a "$LOG_FILE"
+            urls+=("$OFFLINE_PLACEHOLDER")
         fi
+        names+=("$name")
     done
 
-    # Return arrays via global variables
-    ONLINE_CAMERA_URLS=("${online[@]}")
+    ONLINE_CAMERA_URLS=("${urls[@]}")
     ONLINE_CAMERA_NAMES=("${names[@]}")
 
-    return ${#online[@]}
+    return ${#urls[@]}
 }
+
 
 # Build FFmpeg filter for available cameras (UPDATED FOR LOWER RESOLUTION)
 build_filter_complex() {
@@ -328,7 +338,11 @@ start_ffmpeg() {
             continue
         fi
 
-        echo "$(date) - 📹 使用 $cam_count 个在线摄像头录制" | tee -a "$LOG_FILE"
+        local live_count=0
+        for u in "${ONLINE_CAMERA_URLS[@]}"; do
+            [ "$u" != "$OFFLINE_PLACEHOLDER" ] && live_count=$((live_count+1))
+        done
+        echo "$(date) - 📹 $cam_count 个画面位置，其中 $live_count 个摄像头在线" | tee -a "$LOG_FILE"
 
         # Create new timestamp for filename
         TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
@@ -352,6 +366,12 @@ start_ffmpeg() {
         # Build input arguments
         local input_args=""
         for url in "${ONLINE_CAMERA_URLS[@]}"; do
+            if [ "$url" = "$OFFLINE_PLACEHOLDER" ]; then
+                # -re paces the synthetic source at wall-clock speed so it does
+                # not race ahead of the live camera inputs.
+                input_args="$input_args -f lavfi -re -i color=c=0x141414:s=640x360:r=${FRAME_RATE}"
+                continue
+            fi
             local url_opts=""
             case "$url" in
                 rtsp://*|rtsps://*) url_opts="-rtsp_transport tcp" ;;
