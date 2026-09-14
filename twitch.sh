@@ -13,6 +13,14 @@ OUTPUT_HEIGHT=480
 
 # Monitoring settings
 NO_FILES_THRESHOLD=3
+# How many finished 60s segments go into each push to Twitch. Streaming uses
+# -re, so a push of N segments takes N minutes of wall clock while N more are
+# being recorded - the pipeline is self-balancing at any value. Larger is
+# better for continuity: the RTMP connection is opened and closed once per
+# push, and every close ends the broadcast and starts a new VOD. At 9 that was
+# a reconnection every nine minutes; at 20 it is every twenty. The +1 in the
+# tail below skips the newest file, which is still being written.
+COMBINE_SEGMENTS=${COMBINE_SEGMENTS:-20}
 no_files_count=0
 last_restart_time=0
 RESTART_COOLDOWN=120
@@ -217,7 +225,7 @@ while true; do
             timestamp=$(stat -c %Y "$file" 2>/dev/null)
             echo "$timestamp $file"
         done | \
-        sort -n | tail -n 10 | head -n 9 | cut -d' ' -f2- | \
+        sort -n | tail -n $((COMBINE_SEGMENTS + 1)) | head -n $COMBINE_SEGMENTS | cut -d' ' -f2- | \
         while IFS= read -r file; do
             log "  Checking: $file"
             if ffprobe -v error -show_format -show_streams "$file" > /dev/null 2>&1; then
@@ -254,8 +262,11 @@ while true; do
             file_size=$(stat -c%s "$OUTPUT_FILE" 2>/dev/null)
             log "📡 Streaming combined file (size: $file_size bytes)..."
 
-            # FIXED: Proper streaming with re-encoding for Twitch compatibility
-            timeout 300 ffmpeg -re -i "$OUTPUT_FILE" \
+            # -re streams at wall-clock speed, so a push takes as long as the combined
+            # file. The old fixed 300s cap truncated every push at five minutes and
+            # dropped the RTMP connection there, which ends the broadcast and starts a
+            # new VOD. Derived from the file length now, with two minutes of slack.
+            timeout $((COMBINE_SEGMENTS * 60 + 120)) ffmpeg -re -i "$OUTPUT_FILE" \
                 -c:v libx264 -preset veryfast -tune zerolatency \
                 -b:v 1500k -maxrate 2000k -bufsize 4000k \
                 -g 60 -keyint_min 30 \
