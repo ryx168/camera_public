@@ -97,21 +97,10 @@ check_camera() {
     case "$url" in
         rtsp://*|rtsps://*) extra="-rtsp_transport tcp"; limit=15 ;;
     esac
-    # The cameras sit on a 2.4GHz band currently losing about a third of
-    # packets, so a single probe wrongly marks a healthy camera offline about
-    # that often. This runs before every 60s segment, so the retry is kept
-    # cheap: a missed probe now only costs one segment of placeholder, because
-    # the pane is preserved either way and the camera rejoins next cycle.
-    local tries=${CAMERA_PROBE_TRIES:-2} i
-    for i in $(seq 1 "$tries"); do
-        if timeout $limit ffprobe -v quiet $extra -analyzeduration 2000000 -probesize 2000000             -i "$url" -show_entries format=duration >/dev/null 2>&1; then
-            return 0
-        fi
-        [ "$i" -lt "$tries" ] && sleep 1
-    done
-    return 1
+    timeout $limit ffprobe -v quiet $extra -analyzeduration 2000000 -probesize 2000000 \
+        -i "$url" -show_entries format=duration >/dev/null 2>&1
+    return $?
 }
-
 
 # Get online cameras
 get_online_cameras() {
@@ -402,7 +391,7 @@ start_ffmpeg() {
                 -g 60 -keyint_min 30 \
                 -r ${FRAME_RATE} -pix_fmt yuv420p \
                 -f mp4 -movflags +faststart \
-                -t $SEGMENT_DURATION "$LOCAL_FILE.part" &
+                -t $SEGMENT_DURATION "$LOCAL_FILE" &
         else
             # Software encoding with CRF
             timeout $FFMPEG_TIMEOUT ffmpeg -threads 4 \
@@ -417,7 +406,7 @@ start_ffmpeg() {
                 -g 60 -keyint_min 30 \
                 -r ${FRAME_RATE} -pix_fmt yuv420p \
                 -f mp4 -movflags +faststart \
-                -t $SEGMENT_DURATION "$LOCAL_FILE.part" &
+                -t $SEGMENT_DURATION "$LOCAL_FILE" &
         fi
 
         # Save process ID
@@ -432,17 +421,6 @@ start_ffmpeg() {
 
         # Cleanup PID file
         rm -f "$PID_FILE"
-
-        # Publish the segment atomically. twitch.sh globs *.mp4, and an mp4 is
-        # unreadable until ffmpeg writes its moov atom, so it was picking up
-        # the segment still being recorded, failing ffprobe on it, and finding
-        # nothing to send. That starves the Twitch connection, which drops and
-        # reopens as a new broadcast - the cause of the thousands of ~20s VODs.
-        if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 124 ]; then
-            mv -f "$LOCAL_FILE.part" "$LOCAL_FILE" 2>/dev/null
-        else
-            rm -f "$LOCAL_FILE.part"
-        fi
 
         # Check exit code
         if [ $EXIT_CODE -eq 0 ]; then
