@@ -115,6 +115,10 @@ def send(offline, online):
 
 
 def main():
+    # --test proves the mail path end to end without waiting for a real
+    # outage: it reports the true camera states but forces a send.
+    force = "--test" in sys.argv or os.environ.get("FORCE_TEST") == "1"
+
     online, offline = [], []
     for name, url in CAMERAS:
         ok = probe(url)
@@ -124,6 +128,9 @@ def main():
     print("\n%d/%d cameras reachable" % (len(online), len(CAMERAS)))
     if offline:
         send(offline, online)
+    elif force:
+        print("test mode: every camera is up, sending a sample alert anyway")
+        send([("(test) no camera is actually offline", "n/a")], online)
     return 0            # never fail the stream over this
 
 
