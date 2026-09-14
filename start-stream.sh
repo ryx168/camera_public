@@ -93,9 +93,13 @@ trap cleanup SIGTERM SIGINT SIGQUIT
 # Check camera connectivity using ffprobe (actually tests the stream)
 check_camera() {
     local url=$1
-    local extra="" limit=12
+    # Measured from a GitHub runner over Tailscale, a healthy camera answers in
+    # 9-11s; the old 12s/15s limits sat 1-3s above that, so normal jitter marked
+    # working cameras offline. On the LAN the same probes take ~2s - the limit
+    # has to fit the relay path, which is where this actually runs.
+    local extra="" limit=${CAMERA_PROBE_TIMEOUT:-30}
     case "$url" in
-        rtsp://*|rtsps://*) extra="-rtsp_transport tcp"; limit=15 ;;
+        rtsp://*|rtsps://*) extra="-rtsp_transport tcp"; limit=${CAMERA_PROBE_TIMEOUT_RTSP:-35} ;;
     esac
     timeout $limit ffprobe -v quiet $extra -analyzeduration 2000000 -probesize 2000000 \
         -i "$url" -show_entries format=duration >/dev/null 2>&1
@@ -109,28 +113,55 @@ get_online_cameras() {
 
     echo "$(date) - 检查摄像头连接状态..." | tee -a "$LOG_FILE"
 
+    # Probe every camera at once. Sequentially this took ~70s for six cameras
+    # with the longer timeouts - longer than a segment - so recording could not
+    # start before twitch.sh had already decided the recorder was dead.
+    local tmp
+    tmp=$(mktemp -d)
+    local -a probe_pids=()
+    local idx=0
     for name in "${CAMERA_ORDER[@]}"; do
-        local url="${CAMERA_URLS[$name]}"
-        if check_camera "$url"; then
+        (
+            if check_camera "${CAMERA_URLS[$name]}"; then
+                echo "up" > "$tmp/$idx"
+            else
+                echo "down" > "$tmp/$idx"
+            fi
+        ) &
+        probe_pids+=($!)
+        idx=$((idx + 1))
+    done
+    # Wait on the probes only. A bare `wait` would also block on the Front Door
+    # AI detector running in the background from this same shell, which never
+    # exits - that would hang the recorder permanently.
+    local pid
+    for pid in "${probe_pids[@]}"; do
+        wait "$pid"
+    done
+
+    idx=0
+    for name in "${CAMERA_ORDER[@]}"; do
+        if [ "$(cat "$tmp/$idx" 2>/dev/null)" = "up" ]; then
             echo "$(date) - ✅ 摄像头 $name 连接正常" | tee -a "$LOG_FILE"
-            urls+=("$url")
+            urls+=("${CAMERA_URLS[$name]}")
         else
-            # Keep the pane rather than dropping the camera. Removing one
-            # renumbers every pane after it and switches the whole mosaic to a
-            # different layout, so a camera blinking out silently changes which
-            # camera each position belongs to - and the archive then attributes
-            # motion to the wrong camera for that whole run.
+            # Keep the pane. Dropping an offline camera renumbers every pane
+            # after it and switches the mosaic to a different layout, so the
+            # archive then attributes motion to the wrong camera.
             echo "$(date) - ⚠️  摄像头 $name 离线 - 保留画面位置" | tee -a "$LOG_FILE"
             urls+=("$OFFLINE_PLACEHOLDER")
         fi
         names+=("$name")
+        idx=$((idx + 1))
     done
+    rm -rf "$tmp"
 
     ONLINE_CAMERA_URLS=("${urls[@]}")
     ONLINE_CAMERA_NAMES=("${names[@]}")
 
     return ${#urls[@]}
 }
+
 
 
 # Build FFmpeg filter for available cameras (UPDATED FOR LOWER RESOLUTION)
