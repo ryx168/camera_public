@@ -142,6 +142,28 @@ jobs:
           echo ""
           echo "📹 $ONLINE_COUNT camera(s) accessible — continuing to stream..."
       
+      - name: Alert on unreachable cameras
+        # Runs on the same Tailscale path the stream uses, so it reports
+        # reachability as the stream will actually experience it. Never
+        # fails the job: a camera being down is news, not a reason to
+        # abandon recording the ones that are up.
+        continue-on-error: true
+        env:
+          CAM_PASS: ${{ secrets.CAM_PASS }}
+          WYZE_PASS: ${{ secrets.WYZE_PASS }}
+          SES_SMTP_HOST: ${{ secrets.SES_SMTP_HOST }}
+          SES_SMTP_PORT: ${{ secrets.SES_SMTP_PORT }}
+          SES_SMTP_USER: ${{ secrets.SES_SMTP_USER }}
+          SES_SMTP_PASS: ${{ secrets.SES_SMTP_PASS }}
+          SES_SMTP_FROM: ${{ secrets.SES_SMTP_FROM }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: python3 notify_offline_cameras.py
+
       - name: Stream to Twitch
         timeout-minutes: 355
         env:
