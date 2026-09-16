@@ -30,6 +30,17 @@ BASE = os.environ.get("ARCHIVE_BASE", os.path.abspath("archive"))
 MAX_MB = float(os.environ.get("STANDALONE_MAX_MB", "40"))
 
 
+# A neutral tile, inline, for a thumbnail that could not be embedded. Never a
+# relative URL - that 404s on a static host.
+PLACEHOLDER = (
+    "data:image/svg+xml;utf8,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='236'%3E"
+    "%3Crect width='100%25' height='100%25' fill='%23efece7'/%3E"
+    "%3Ctext x='50%25' y='50%25' dominant-baseline='middle' "
+    "text-anchor='middle' font-family='system-ui,sans-serif' font-size='15' "
+    "fill='%239a948c'%3Ethumbnail not in this copy%3C/text%3E%3C/svg%3E")
+
+
 def data_uri(path):
     ext = os.path.splitext(path)[1].lower()
     mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -85,8 +96,12 @@ def build(day, drive_id=""):
         if os.path.exists(p):
             embedded += 1
             return 'src="%s"' % data_uri(p)
+        # Leaving the original relative src here is the worst outcome: on a
+        # static host it resolves to a URL that does not exist and the reader
+        # gets a broken-image icon. An inline placeholder keeps the layout and
+        # says plainly that the picture did not travel with the page.
         missing += 1
-        return m.group(0)
+        return 'src="%s"' % PLACEHOLDER
 
     html = re.sub(r'src="((?:thumbs/|contact_sheet)[^"]*)"', embed, html)
 
