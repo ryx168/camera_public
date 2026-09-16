@@ -12,7 +12,8 @@ and no folder structure around it.
 
 What cannot come along is rewritten rather than left broken:
 
-  * the "Live now" tile polls the NAS, so it is removed
+  * the "Live now" tile polls the NAS, so it becomes a still of the
+    most recent mosaic frame instead
   * incident cards link to activity/*.mp4, which are tens of gigabytes and stay
     on Drive - the cards become plain tiles and a single link at the top goes
     to the day's Drive folder
@@ -53,8 +54,25 @@ def build(day, drive_id=""):
         html = re.sub(r'<link[^>]*href="style\.css"[^>]*>',
                       "<style>\n%s\n</style>" % css, html, count=1)
 
-    # ---- the live tile needs the NAS; drop it ----
-    html = re.sub(r"<h2>Live now</h2>.*?</script>", "", html,
+    # ---- the live tile polls the NAS, so it cannot work on a static copy.
+    # Rather than just removing it, put the most recent mosaic frame in its
+    # place so the page still opens on "what the cameras last saw".
+    latest = ""
+    # build_daily writes these under summary/hours, not beside it.
+    hours = os.path.join(summ, "hours")
+    if os.path.isdir(hours):
+        frames = sorted(f for f in os.listdir(hours) if f.endswith(".jpg"))
+        if frames:
+            slot = os.path.splitext(frames[-1])[0]
+            label = "%s:%s" % (slot[:2], slot[2:]) if len(slot) == 4 else slot
+            latest = ('<h2>Latest frame</h2>'
+                      '<p class=sub>Mosaic at %s. This is a snapshot, not a '
+                      'live feed &mdash; the live view needs the NAS.</p>'
+                      '<img src="%s" alt="latest mosaic" '
+                      'style="width:100%%;max-width:760px;border-radius:10px;'
+                      'border:1px solid var(--line, #e6e2db)">'
+                      % (label, data_uri(os.path.join(hours, frames[-1]))))
+    html = re.sub(r"<h2>Live now</h2>.*?</script>", latest, html,
                   flags=re.S, count=1)
 
     # ---- images become data URIs ----

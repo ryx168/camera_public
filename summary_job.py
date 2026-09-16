@@ -261,6 +261,12 @@ def main():
     # it can carry a link to the folder it now lives in; the second push only
     # carries that new file.
     try:
+        # The working pull skips thumbs/ because the analysis never reads them
+        # back - but the standalone page must embed every one, and the runner
+        # only has the handful it just produced. Fetch the rest now, or the
+        # page ships with broken images (measured: 2 embedded, 61 missing).
+        rclone(["copy", "%s/daily/%s/summary/thumbs" % (REMOTE, day),
+                os.path.join(DAILY, day, "summary", "thumbs")], quiet=True)
         import standalone
         if standalone.build(day, fid):
             push_state(day)
