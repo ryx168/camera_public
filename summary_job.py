@@ -205,6 +205,19 @@ def main():
 
     push_state(day)
     fid = drive_folder_id(day)
+
+    # Drive will not render HTML, so also fold the day into one file with the
+    # stylesheet and every thumbnail inlined. That one downloads from Drive and
+    # opens anywhere, with no NAS and no network. Built after the first push so
+    # it can carry a link to the folder it now lives in; the second push only
+    # carries that new file.
+    try:
+        import standalone
+        if standalone.build(day, fid):
+            push_state(day)
+    except Exception as e:
+        log("standalone page failed (report is already published): %s" % e)
+
     log("=== published %s to %s/daily/%s%s ==="
         % (day, REMOTE, day, " (folder %s)" % fid if fid else ""))
     return 0
