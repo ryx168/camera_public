@@ -331,8 +331,21 @@ while true; do
             out_dur=${out_dur%%.*}
             if [ -z "$out_dur" ] || [ "$out_dur" -lt "$MIN_PUSH_SECONDS" ]; then
                 log "⏸ Combined file is only ${out_dur:-0}s (need ${MIN_PUSH_SECONDS}s)."
-                log "   Segments are truncated - skipping this push."
-                last_pushed_ts=$pending_mark
+                # Do NOT advance the cursor here. Marking these as broadcast
+                # when they were never sent consumed every batch and reset the
+                # pending count to zero each cycle, so the push was starved for
+                # ever and the channel never went live. Leaving the cursor
+                # alone means the next cycle re-combines these segments plus
+                # whatever has arrived since, and the duration grows until it
+                # clears the floor.
+                if [ "$new_segments" -ge "$COMBINE_SEGMENTS" ]; then
+                    # A full batch that is still too short is genuinely broken
+                    # footage, not a slow start. Drop it, or it blocks for ever.
+                    log "   A full batch of $new_segments is still too short - discarding it."
+                    last_pushed_ts=$pending_mark
+                else
+                    log "   Waiting for more segments so the batch gets longer."
+                fi
                 sleep 15
                 continue
             fi
