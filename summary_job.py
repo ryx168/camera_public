@@ -242,6 +242,19 @@ def main():
 
     pull_state(day)
 
+    if os.environ.get("REBUILD") == "1":
+        # Discard the cache and analyse the day again. Needed when cached
+        # values are wrong rather than merely stale - the content timestamps
+        # written while the runner was on UTC are epochs, seven hours out and
+        # impossible to correct in place, and entries inherited from the NAS
+        # reference thumbnails that were never uploaded.
+        cache = os.path.join(DAILY, day, "analysis.json")
+        if os.path.exists(cache):
+            os.remove(cache)
+        rclone(["delete", "%s/daily/%s/analysis.json" % (REMOTE, day)],
+               quiet=True)
+        log("rebuild: cache discarded, analysing %s from scratch" % day)
+
     rows, added = merge_index(list_twitch())
     log("index: %d VODs known (%d new)" % (len(rows), added))
 

@@ -29,6 +29,10 @@ on:
       window_hours:
         description: "How far back to look for new VODs (default 2)."
         required: false
+      rebuild:
+        description: "Discard the day's cache and analyse it again from scratch"
+        type: boolean
+        default: false
 
 # Never overlap: a second copy would fight the first over the Drive cache.
 concurrency:
@@ -127,6 +131,7 @@ jobs:
           TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL || 'elarathornfield168' }}
           DAY: ${{ inputs.day }}
           WINDOW_HOURS: ${{ inputs.window_hours || '2' }}
+          REBUILD: ${{ inputs.rebuild && '1' || '0' }}
           RCLONE_REMOTE: gdrive:camera_archive
         run: python3 summary_job.py
 
