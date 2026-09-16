@@ -31,10 +31,12 @@ import subprocess
 CHANNEL = os.environ.get("TWITCH_CHANNEL", "elarathornfield168")
 BASE = os.environ.get("ARCHIVE_BASE", os.path.abspath("archive"))
 REMOTE = os.environ.get("RCLONE_REMOTE", "gdrive:camera_archive")
-# How far back to look. Must exceed the gap between runs or footage falls
-# straight through it: the workflow runs every 6 hours, so 7 gives an hour of
-# overlap for a slow VOD or a late start.
-WINDOW_H = float(os.environ.get("WINDOW_HOURS", "7"))
+# How far back to look. Must comfortably exceed the gap between runs or
+# footage falls straight through it. At a 15-minute cadence 2 hours covers
+# roughly eight missed ticks, which matters because GitHub delays or drops
+# scheduled runs under load. The overlap is nearly free: anything already in
+# the analysis cache is skipped without being downloaded again.
+WINDOW_H = float(os.environ.get("WINDOW_HOURS", "2"))
 
 CLIPS = os.path.join(BASE, "clips")
 DAILY = os.path.join(BASE, "daily")

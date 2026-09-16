@@ -12,22 +12,31 @@ name: Camera Summary
 
 on:
   schedule:
-    # Every 6 hours, matching the stream workflow, but offset 20 minutes so the
-    # two never start together and compete for the runner.
-    - cron: '20 */6 * * *'
+    # Every 15 minutes. A job cannot simply stay running - Actions caps at 6
+    # hours and there is no way to hold one open - so frequent short runs are
+    # the closest thing to continuous. Each run only decodes VODs that are not
+    # already in the cache, so a short cadence is cheap.
+    #
+    # GitHub delays or drops scheduled runs when it is busy, which is why the
+    # look-back window is far wider than the gap: missing a few ticks costs
+    # nothing because the next one picks the footage up.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       day:
         description: "Day to build (YYYY-MM-DD). Blank = today."
         required: false
       window_hours:
-        description: "How far back to look for new VODs (default 7)."
+        description: "How far back to look for new VODs (default 2)."
         required: false
 
 # Never overlap: a second copy would fight the first over the Drive cache.
 concurrency:
   group: camera-summary
-  cancel-in-progress: false
+  # At a 15-minute cadence a slow run would otherwise queue behind the next
+  # tick and the backlog would grow. The newest run has the freshest footage
+  # and the cache makes it cheap, so let it take over.
+  cancel-in-progress: true
 
 # The site deploy needs these; the build job itself only reads the repo.
 permissions:
@@ -109,7 +118,7 @@ jobs:
         env:
           TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL || 'elarathornfield168' }}
           DAY: ${{ inputs.day }}
-          WINDOW_HOURS: ${{ inputs.window_hours || '7' }}
+          WINDOW_HOURS: ${{ inputs.window_hours || '2' }}
           RCLONE_REMOTE: gdrive:camera_archive
         run: python3 summary_job.py
 
