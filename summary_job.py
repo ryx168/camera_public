@@ -182,6 +182,53 @@ def download_window(rows, day):
     return got
 
 
+def write_step_summary(day, fid):
+    """Put the digest on the run page itself.
+
+    GitHub renders $GITHUB_STEP_SUMMARY as Markdown right on the run, so the
+    result is readable without downloading anything. It strips data: URIs, so
+    the thumbnails cannot come along - those are in the artifact and on Drive.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    import csv as _csv
+    from collections import Counter
+    out = os.path.join(DAILY, day, "summary")
+    rows = []
+    try:
+        with open(os.path.join(out, "events.csv"), newline="",
+                  encoding="utf-8") as f:
+            rows = list(_csv.DictReader(f))
+    except Exception:
+        pass
+    per_cam = Counter(r["camera"] for r in rows)
+
+    md = ["## Camera summary %s" % day, ""]
+    if not rows:
+        md.append("Nothing moved on any camera.")
+    else:
+        md += ["**%d activity clips** across %d camera%s."
+               % (len(rows), len(per_cam), "" if len(per_cam) == 1 else "s"),
+               "", "| Camera | Clips |", "|---|---:|"]
+        md += ["| %s | %d |" % (c, n) for c, n in per_cam.most_common()]
+        md += ["", "### Most recent", "", "| Time | Camera | Motion |",
+               "|---|---|---:|"]
+        md += ["| %s | %s | %s |" % ((r.get("time") or "")[11:19], r["camera"],
+                                     r.get("motion_px", "?"))
+               for r in rows[-8:]]
+    if fid:
+        md += ["", "[Open this day on Google Drive]"
+                   "(https://drive.google.com/drive/folders/%s)" % fid]
+    md += ["", "_The full page is in the **summary-page** artifact below - "
+               "download and open it; it is self-contained._"]
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n".join(md) + "\n")
+    except Exception as e:
+        log("could not write the step summary: %s" % e)
+
+
 # ---------------------------------------------------------------- main -----
 
 def main():
@@ -218,6 +265,7 @@ def main():
     except Exception as e:
         log("standalone page failed (report is already published): %s" % e)
 
+    write_step_summary(day, fid)
     log("=== published %s to %s/daily/%s%s ==="
         % (day, REMOTE, day, " (folder %s)" % fid if fid else ""))
     return 0

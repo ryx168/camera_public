@@ -131,6 +131,18 @@ jobs:
           fi
           python3 summary_email.py
 
+      - name: Upload the report page
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # The self-contained page: download, open, done. GitHub will not
+          # render an artifact as a web page, so the digest on the run page
+          # above is the "view without downloading" route.
+          name: summary-page
+          path: archive/daily/*/summary/summary-*.html
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Upload run log
         if: always()
         uses: actions/upload-artifact@v4
