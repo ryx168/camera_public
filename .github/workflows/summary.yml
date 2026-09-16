@@ -29,6 +29,12 @@ concurrency:
   group: camera-summary
   cancel-in-progress: false
 
+# The site deploy needs these; the build job itself only reads the repo.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   summary:
     runs-on: ubuntu-latest
@@ -143,6 +149,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Assemble the Pages site
+        if: always()
+        env:
+          RCLONE_REMOTE: gdrive:camera_archive
+          SITE_DAYS: '14'
+        run: python3 publish_site.py || echo "::warning::site not assembled"
+
+      - name: Upload the Pages artifact
+        if: always()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
       - name: Upload run log
         if: always()
         uses: actions/upload-artifact@v4
@@ -151,3 +170,17 @@ jobs:
           path: archive/logs/
           if-no-files-found: ignore
           retention-days: 7
+
+  publish:
+    needs: summary
+    if: always()
+    runs-on: ubuntu-latest
+    # Must be github-pages, and a job can only have one environment - which is
+    # why this is separate from the build job rather than another step in it.
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
