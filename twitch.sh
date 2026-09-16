@@ -21,23 +21,6 @@ NO_FILES_THRESHOLD=3
 # a reconnection every nine minutes; at 20 it is every twenty. The +1 in the
 # tail below skips the newest file, which is still being written.
 COMBINE_SEGMENTS=${COMBINE_SEGMENTS:-20}
-
-# Never push fewer than this. Sending one or two segments opens and closes the
-# RTMP connection for a few seconds of footage, which ends the broadcast and
-# starts another VOD - the micro-VOD churn.
-MIN_SEGMENTS=${MIN_SEGMENTS:-3}
-
-# Anything shorter than this from the combine step is a broken input set, not a
-# broadcast; pushing it just ends the stream again.
-MIN_PUSH_SECONDS=${MIN_PUSH_SECONDS:-45}
-
-# Newest segment mtime already broadcast. Selection used to re-pick the newest
-# N files every cycle with no record of what had gone out, so whenever
-# recording stalled or fell behind, the same segments were re-encoded and
-# re-sent - the viewer saw the picture freeze while the burnt-in camera clock
-# sat still for half an hour. Each segment now goes out exactly once.
-last_pushed_ts=0
-
 no_files_count=0
 last_restart_time=0
 RESTART_COOLDOWN=120
@@ -237,65 +220,23 @@ while true; do
     > "$LIST_FILE"
 
     # Alpine-compatible: manually get timestamps with stat
-    ALL_FILE="$RECORDINGS_DIR/.segments"
     find "$RECORDINGS_DIR" -maxdepth 1 -type f -name "*.mp4" 2>/dev/null | \
         while IFS= read -r file; do
             timestamp=$(stat -c %Y "$file" 2>/dev/null)
-            [ -n "$timestamp" ] && echo "$timestamp $file"
-        done | sort -n > "$ALL_FILE"
+            echo "$timestamp $file"
+        done | \
+        sort -n | tail -n $((COMBINE_SEGMENTS + 1)) | head -n $COMBINE_SEGMENTS | cut -d' ' -f2- | \
+        while IFS= read -r file; do
+            log "  Checking: $file"
+            if ffprobe -v error -show_format -show_streams "$file" > /dev/null 2>&1; then
+                echo "file '$file'" >> "$LIST_FILE"
+                log "    ✅ Added to list"
+            else
+                log "    ⚠️ Skipping invalid file: $file"
+            fi
+        done
 
-    total_segments=$(wc -l < "$ALL_FILE")
-    if [ "$total_segments" -lt 2 ]; then
-        log "⏸ Only $total_segments segment(s) on disk. Retrying in 10 seconds..."
-        sleep 10
-        continue
-    fi
-
-    # Drop the newest: start-stream.sh is still writing it.
-    head -n $((total_segments - 1)) "$ALL_FILE" > "$ALL_FILE.settled"
-
-    # Only what has not been broadcast yet, oldest first, so the archive stays
-    # continuous and in order instead of jumping to whatever is newest.
-    awk -v mark="$last_pushed_ts" '$1 > mark' "$ALL_FILE.settled" > "$ALL_FILE.new"
-    new_segments=$(wc -l < "$ALL_FILE.new")
-    log "📊 $new_segments segment(s) not yet broadcast"
-
-    # cleanup_old_files deletes anything over an hour old, so a backlog that
-    # deep is going to be erased before it can be sent. Skip forward rather
-    # than spend the cycle pushing footage that is about to vanish.
-    max_backlog=$((COMBINE_SEGMENTS * 2))
-    if [ "$new_segments" -gt "$max_backlog" ]; then
-        drop=$((new_segments - max_backlog))
-        log "⏭ Backlog of $new_segments exceeds $max_backlog - skipping $drop oldest"
-        tail -n +$((drop + 1)) "$ALL_FILE.new" > "$ALL_FILE.tmp"
-        mv "$ALL_FILE.tmp" "$ALL_FILE.new"
-        new_segments=$max_backlog
-    fi
-
-    if [ "$new_segments" -lt "$MIN_SEGMENTS" ]; then
-        log "⏸ Only $new_segments new segment(s) since the last push - waiting"
-        log "   rather than re-sending footage that has already gone out."
-        sleep 20
-        continue
-    fi
-
-    head -n "$COMBINE_SEGMENTS" "$ALL_FILE.new" > "$ALL_FILE.take"
-
-    # Read from a file, not a pipe: a `while read` on the right-hand side of a
-    # pipe runs in a subshell and pending_mark would be lost with it.
-    pending_mark=0
-    while IFS=' ' read -r seg_ts seg_file; do
-        log "  Checking: $seg_file"
-        if ffprobe -v error -show_format -show_streams "$seg_file" > /dev/null 2>&1; then
-            echo "file '$seg_file'" >> "$LIST_FILE"
-            pending_mark=$seg_ts
-            log "    ✅ Added to list"
-        else
-            log "    ⚠️ Skipping invalid file: $seg_file"
-        fi
-    done < "$ALL_FILE.take"
-
-    if [ ! -s "$LIST_FILE" ] || [ "$(wc -l < "$LIST_FILE")" -lt "$MIN_SEGMENTS" ]; then
+    if [ ! -s "$LIST_FILE" ] || [ "$(wc -l < "$LIST_FILE")" -lt 2 ]; then
         log "⏸ Not enough valid files to combine. Retrying in 10 seconds..."
         sleep 10
         continue
@@ -313,31 +254,13 @@ while true; do
         -g 60 -keyint_min 30 \
         -r 20 -pix_fmt yuv420p \
         -movflags +faststart \
-        "$OUTPUT_FILE" -y 2>&1 | grep -v "frame=" | tee -a "$LOG_FILE"
-    # ${PIPESTATUS[0]} is ffmpeg's status; plain $? would be tee's, which is
-    # ~always 0, so a failed combine used to read as a success.
-    [ "${PIPESTATUS[0]}" -eq 0 ]; then
+        "$OUTPUT_FILE" -y 2>&1 | grep -v "frame=" | tee -a "$LOG_FILE"; then
         
         log "✅ Successfully combined and scaled files to ${OUTPUT_WIDTH}x${OUTPUT_HEIGHT}"
 
         if [ -f "$OUTPUT_FILE" ]; then
             file_size=$(stat -c%s "$OUTPUT_FILE" 2>/dev/null)
-
-            # A combine that yields seconds instead of minutes means the input
-            # segments were truncated. Pushing it ends the broadcast almost as
-            # soon as it starts and leaves another stub VOD behind.
-            out_dur=$(ffprobe -v error -show_entries format=duration \
-                      -of default=nw=1:nk=1 "$OUTPUT_FILE" 2>/dev/null)
-            out_dur=${out_dur%%.*}
-            if [ -z "$out_dur" ] || [ "$out_dur" -lt "$MIN_PUSH_SECONDS" ]; then
-                log "⏸ Combined file is only ${out_dur:-0}s (need ${MIN_PUSH_SECONDS}s)."
-                log "   Segments are truncated - skipping this push."
-                last_pushed_ts=$pending_mark
-                sleep 15
-                continue
-            fi
-
-            log "📡 Streaming combined file (${out_dur}s, size: $file_size bytes)..."
+            log "📡 Streaming combined file (size: $file_size bytes)..."
 
             # -re streams at wall-clock speed, so a push takes as long as the combined
             # file. The old fixed 300s cap truncated every push at five minutes and
@@ -352,18 +275,13 @@ while true; do
                 "$STREAM_URL" 2>&1 | \
                 grep -E "(error|Error|failed|Failed|Connection|frame=)" | tee -a "$LOG_FILE"
 
-            # Again ffmpeg's status, not tee's.
-            stream_exit_code=${PIPESTATUS[0]}
+            stream_exit_code=$?
 
             if [ $stream_exit_code -eq 0 ]; then
                 log "✅ Streaming finished successfully"
-                # These segments have been broadcast; never send them again.
-                last_pushed_ts=$pending_mark
                 consecutive_failures=0
             elif [ $stream_exit_code -eq 124 ]; then
-                log "⏱️ Streaming hit the timeout - moving on"
-                # Cut short, but re-sending would only repeat the freeze.
-                last_pushed_ts=$pending_mark
+                log "⏱️ Streaming timeout (normal after 5 minutes)"
                 consecutive_failures=0
             else
                 consecutive_failures=$((consecutive_failures + 1))
