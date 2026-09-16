@@ -54,6 +54,14 @@ jobs:
     # so this adds no approval step.
     environment: camera-access
     timeout-minutes: 90
+    env:
+      # Runners are UTC. Without this every timestamp in the report is seven
+      # hours out, the half-hour buckets land in the wrong slots, and - worst -
+      # date.today() rolls over at 17:00 local, so an evening run builds
+      # tomorrow's empty day instead of today's. The NAS and the stream
+      # workflow both use this zone; they must agree or they fight over the
+      # same Drive paths with different day boundaries.
+      TZ: America/Vancouver
 
     steps:
       - name: Checkout code
@@ -184,6 +192,8 @@ jobs:
     needs: summary
     if: always()
     runs-on: ubuntu-latest
+    env:
+      TZ: America/Vancouver
     # Must be github-pages, and a job can only have one environment - which is
     # why this is separate from the build job rather than another step in it.
     environment:
