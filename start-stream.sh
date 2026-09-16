@@ -410,7 +410,19 @@ start_ffmpeg() {
             case "$url" in
                 rtsp://*|rtsps://*) url_opts="-rtsp_transport tcp" ;;
             esac
-            input_args="$input_args -thread_queue_size 1024 -analyzeduration 5000000 -probesize 5000000 -fflags +genpts -use_wallclock_as_timestamps 1 -timeout 10000000 $url_opts -i $url"
+            # Survive a camera hiccup instead of dying on it. A single MJPEG
+            # read timing out ("Error during demuxing: Connection timed out")
+            # ends ffmpeg and truncates the whole segment - measured output was
+            # 2 seconds instead of 60, roughly one segment per 100s, which is
+            # far too little to broadcast. Reconnect the HTTP demuxer rather
+            # than letting one flaky camera take down all six.
+            local retry_opts=""
+            case "$url" in
+                http://*|https://*)
+                    retry_opts="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -rw_timeout 15000000"
+                    ;;
+            esac
+            input_args="$input_args -thread_queue_size 1024 -analyzeduration 5000000 -probesize 5000000 -fflags +genpts+discardcorrupt -err_detect ignore_err -use_wallclock_as_timestamps 1 -timeout 10000000 $retry_opts $url_opts -i $url"
         done
 
         # Build filter complex
