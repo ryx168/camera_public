@@ -182,12 +182,14 @@ def main():
     try:
         deliver(from_hdr, from_env)
         print("summary email sent to %s" % ", ".join(rcpt_envs))
-    except smtplib.SMTPSenderRefused as e:
-        # SES refuses a From it has not verified. The recipient address is
-        # necessarily verified (it receives), so retry as that rather than
-        # losing the mail over a configuration detail.
+    except Exception as e:
+        # SES refuses an unverified From at the DATA stage, which surfaces as
+        # SMTPDataError - a 2-tuple - not SMTPSenderRefused. Matching on the
+        # exception class missed it, so match on what the server actually said
+        # and let any 554/"not verified" trigger the retry.
+        detail = str(getattr(e, "smtp_error", "") or "") + " " + str(e)
         alt = rcpt_envs[0] if rcpt_envs else None
-        if alt and alt != from_env and b"not verified" in (e.smtp_error or b""):
+        if alt and alt != from_env and "not verified" in detail.lower():
             print("sender %s is not a verified identity - retrying as %s"
                   % (from_env, alt))
             try:
@@ -198,10 +200,8 @@ def main():
             except Exception as e2:
                 print("::warning::retry also failed: %s" % e2)
         else:
+            # Never fail the workflow over email: the report is already on Drive.
             print("::warning::summary email failed: %s" % e)
-    except Exception as e:
-        # Never fail the workflow over email: the report is already on Drive.
-        print("::warning::summary email failed: %s" % e)
     return 0
 
 
