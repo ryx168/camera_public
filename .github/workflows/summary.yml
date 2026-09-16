@@ -32,6 +32,12 @@ concurrency:
 jobs:
   summary:
     runs-on: ubuntu-latest
+    # Same environment as every other workflow here. Without this, secrets
+    # stored on the environment rather than the repository resolve to an empty
+    # string and the job fails at "Configure rclone" - which is exactly what
+    # happened on the first two runs. camera-access has no protection rules,
+    # so this adds no approval step.
+    environment: camera-access
     timeout-minutes: 90
 
     steps:
