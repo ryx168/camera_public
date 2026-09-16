@@ -25,6 +25,17 @@ KEEP_DAYS = int(os.environ.get("SITE_DAYS", "14"))
 RCLONE_NET = ["--contimeout", "20s", "--timeout", "300s",
               "--low-level-retries", "3", "--retries", "2"]
 
+REDIRECT = """<!doctype html><html lang=en><meta charset=utf-8>
+<meta http-equiv="refresh" content="0; url={target}">
+<title>Camera summaries</title>
+<link rel="canonical" href="{target}">
+<style>body{{margin:0;font:15px/1.6 system-ui,sans-serif;background:#fbfaf8;
+color:#1a1a1a;display:grid;place-items:center;min-height:100vh}}
+a{{color:#b4531f}}</style>
+<p>Opening <a href="{target}">today's summary</a>&hellip;
+<br><a href="days.html">All days</a></p>
+</html>"""
+
 PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Camera summaries</title>
@@ -101,6 +112,20 @@ def collect():
                    if re.match(r"\d{4}-\d{2}-\d{2}\.html$", f)), reverse=True)
 
 
+def latest_anchor(path):
+    """The last half-hour section in a day page, so the link lands on it.
+
+    Opening at the top of a long day means scrolling past hours of nothing;
+    the newest slot is almost always what someone wants to see.
+    """
+    try:
+        html = open(path, encoding="utf-8").read()
+    except Exception:
+        return ""
+    slots = re.findall(r'id="h(\d{4})"', html)
+    return "#h%s" % max(slots) if slots else ""
+
+
 def days_on_drive():
     r = run(["rclone", "lsf", "--dirs-only", "%s/daily" % REMOTE] + RCLONE_NET)
     if r.returncode != 0:
@@ -123,11 +148,19 @@ def main():
         rows.append('<a class=day href="%s.html"><b>%s</b>'
                     '<span>%.1f MB</span></a>' % (d, label, size))
 
-    with open(os.path.join(SITE, "index.html"), "w", encoding="utf-8") as f:
+    with open(os.path.join(SITE, "days.html"), "w", encoding="utf-8") as f:
         f.write(PAGE.format(
             n=len(days), s="" if len(days) == 1 else "s",
             when=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
             rows="\n".join(rows)))
+
+    # The root goes straight to the newest day, at its newest slot.
+    newest = days[0]
+    target = "%s.html%s" % (newest,
+                            latest_anchor(os.path.join(SITE, "%s.html" % newest)))
+    with open(os.path.join(SITE, "index.html"), "w", encoding="utf-8") as f:
+        f.write(REDIRECT.format(target=target))
+    print("index -> %s" % target)
 
     # Public, but there is no reason to be in search results.
     with open(os.path.join(SITE, "robots.txt"), "w", encoding="utf-8") as f:
