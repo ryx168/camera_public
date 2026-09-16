@@ -36,7 +36,7 @@ CAMERAS = [
     ("Kitchen",      "http://admin:%s@192.168.1.33/video.cgi" % CAM_PASS),
     ("Balcony",      "http://admin:%s@192.168.1.35/video.cgi" % CAM_PASS),
     ("Backyard",     "http://admin:%s@192.168.1.39/video.cgi" % CAM_PASS),
-    ("Control Room", "rtsps://harry:%s@192.168.1.64:322/stream0" % WYZE_PASS),
+    ("Control Room", "rtsps://harry:%s@192.168.1.146:322/stream0" % WYZE_PASS),
 ]
 
 TRIES = int(os.environ.get("CAMERA_PROBE_TRIES", "2"))

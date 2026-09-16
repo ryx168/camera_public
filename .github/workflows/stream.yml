@@ -117,7 +117,7 @@ jobs:
               ["Kitchen"]="http://admin:${CAM_PASS}@192.168.1.33/video.cgi"
               ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.35/video.cgi"
               ["Backyard"]="http://admin:${CAM_PASS}@192.168.1.39/video.cgi"
-              ["Control Room"]="rtsps://harry:${WYZE_PASS}@192.168.1.64:322/stream0"
+              ["Control Room"]="rtsps://harry:${WYZE_PASS}@192.168.1.146:322/stream0"
           )
           
           ONLINE_COUNT=0
