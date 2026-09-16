@@ -56,17 +56,47 @@ jobs:
 
       - name: Configure rclone
         env:
-          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+          # Accept the usual spellings, because a secret under a name this job
+          # does not read looks identical to no secret at all. Which one is
+          # present is reported below by LENGTH ONLY - a value is never echoed.
+          CONF_A: ${{ secrets.RCLONE_CONF }}
+          CONF_B: ${{ secrets.RCLONE_CONFIG }}
+          CONF_C: ${{ secrets.GDRIVE_RCLONE_CONF }}
+          CONF_B64: ${{ secrets.RCLONE_CONF_B64 }}
+          CONF_VAR: ${{ vars.RCLONE_CONF }}
         run: |
-          if [ -z "$RCLONE_CONF" ]; then
-            echo "::error::RCLONE_CONF secret is not set - cannot reach Drive"
+          echo "Candidates visible to this job (length only, never the value):"
+          for n in CONF_A CONF_B CONF_C CONF_B64 CONF_VAR; do
+            eval "v=\${$n}"
+            echo "  $n: ${#v} chars"
+          done
+
+          CONF="${CONF_A:-${CONF_B:-${CONF_C:-${CONF_VAR:-}}}}"
+          if [ -z "$CONF" ] && [ -n "$CONF_B64" ]; then
+            echo "decoding the base64 variant"
+            CONF="$(printf '%s' "$CONF_B64" | base64 -d)"
+          fi
+
+          if [ -z "$CONF" ]; then
+            echo "::error::No rclone config reached this job."
+            echo "::error::Add it as a SECRET named RCLONE_CONF - either on the"
+            echo "::error::repository or on the camera-access environment."
+            echo "::error::A VARIABLE of that name will not work for secrets."
             exit 1
           fi
+
           mkdir -p ~/.config/rclone
-          # Written straight from the secret; never echoed, and the file lives
-          # only for the life of this runner.
-          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+          printf '%s' "$CONF" > ~/.config/rclone/rclone.conf
           chmod 600 ~/.config/rclone/rclone.conf
+
+          # Pasting through some editors turns real newlines into literal \n,
+          # which leaves a file rclone cannot parse. Detect and repair.
+          if ! grep -q '^\[' ~/.config/rclone/rclone.conf; then
+            echo "no [section] header found - repairing escaped newlines"
+            printf '%b' "$CONF" > ~/.config/rclone/rclone.conf
+          fi
+
+          echo "remotes found:"
           rclone listremotes
 
       - name: Build summary and publish to Drive
