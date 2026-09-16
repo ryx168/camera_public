@@ -106,6 +106,31 @@ def drive_folder_id(day):
     return ""
 
 
+def activity_ids(day):
+    """Map each activity clip to its Drive file id, so a card can link to it.
+
+    Only ids are recorded. Opening one still needs access to the account, so
+    the summary can be public while the footage stays behind the login.
+    """
+    r = run(["rclone", "lsjson", "%s/daily/%s/activity" % (REMOTE, day)]
+            + RCLONE_NET, capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        return 0
+    try:
+        rows = json.loads(r.stdout.decode("utf-8", "replace"))
+        ids = {d["Name"]: d["ID"] for d in rows
+               if not d.get("IsDir") and d.get("ID")}
+        if not ids:
+            return 0
+        dst = os.path.join(DAILY, day, "summary", "activity_ids.json")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        json.dump(ids, open(dst, "w"))
+        return len(ids)
+    except Exception as e:
+        log("could not map activity ids: %s" % e)
+        return 0
+
+
 def push_state(day):
     rclone(["copy", INDEX, "%s/state" % REMOTE])
     rclone(["copy", os.path.join(DAILY, day), "%s/daily/%s" % (REMOTE, day),
@@ -280,6 +305,8 @@ def main():
         # page ships with broken images (measured: 2 embedded, 61 missing).
         rclone(["copy", "%s/daily/%s/summary/thumbs" % (REMOTE, day),
                 os.path.join(DAILY, day, "summary", "thumbs")], quiet=True)
+        n = activity_ids(day)
+        log("activity clips on Drive: %d" % n)
         import standalone
         if standalone.build(day, fid):
             push_state(day)

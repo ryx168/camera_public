@@ -14,14 +14,15 @@ What cannot come along is rewritten rather than left broken:
 
   * the "Live now" tile polls the NAS, so it becomes a still of the
     most recent mosaic frame instead
-  * incident cards link to activity/*.mp4, which are tens of gigabytes and stay
-    on Drive - the cards become plain tiles and a single link at the top goes
-    to the day's Drive folder
+  * incident cards link to activity/*.mp4, which are tens of gigabytes and
+    stay on Drive - each card is repointed at that clip's Drive file, so
+    clicking a thumbnail still plays the footage
   * hour pages are separate files, so those links go too
 """
 import os
 import re
 import sys
+import json
 import base64
 import datetime
 
@@ -105,11 +106,30 @@ def build(day, drive_id=""):
 
     html = re.sub(r'src="((?:thumbs/|contact_sheet)[^"]*)"', embed, html)
 
-    # ---- links that cannot work offline ----
-    # Cards point at activity/*.mp4. Those stay on Drive, so make the tile
-    # inert rather than a dead link.
-    html = re.sub(r'<a class=card href="[^"]*\.mp4"', "<span class=card", html)
-    html = re.sub(r"</a>(\s*</div>\s*</section>)", r"</span>\1", html)
+    # ---- links ----
+    # Cards point at activity/*.mp4, far too large to embed, so the clips stay
+    # on Drive. Point each card at that clip's Drive file instead, so clicking
+    # a thumbnail still plays the footage. A clip with no id becomes an inert
+    # tile rather than a link that goes nowhere.
+    ids = {}
+    try:
+        ids = json.load(open(os.path.join(summ, "activity_ids.json")))
+    except Exception:
+        pass
+    linked, inert = [0], [0]
+
+    def relink(m):
+        fid = ids.get(m.group(1))
+        if fid:
+            linked[0] += 1
+            return ('<a class=card target="_blank" rel="noopener" '
+                    'href="https://drive.google.com/file/d/%s/view"' % fid)
+        # An <a> with no href is inert but still closes with </a>, so a mix of
+        # linked and unlinked cards cannot leave unbalanced tags.
+        inert[0] += 1
+        return "<a class=card"
+
+    html = re.sub(r'<a class=card href="[^"]*?/([^"/]+\.mp4)"', relink, html)
     html = re.sub(r'<a class=top href="hourly/[^"]*"[^>]*>.*?</a>', "", html,
                   flags=re.S)
     html = re.sub(r'<a class=hourlink[^>]*>.*?</a>', "", html, flags=re.S)
@@ -133,6 +153,8 @@ def build(day, drive_id=""):
     with open(dst, "w", encoding="utf-8") as f:
         f.write(html)
 
+    print("  cards: %d linked to Drive, %d without a clip id"
+          % (linked[0], inert[0]))
     mb = os.path.getsize(dst) / 1e6
     print("standalone: %s (%.1f MB, %d images embedded%s)"
           % (os.path.basename(dst), mb, embedded,
