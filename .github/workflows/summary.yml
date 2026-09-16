@@ -1,0 +1,79 @@
+name: Camera Summary
+
+# Builds the camera summary in the cloud and publishes it to Google Drive.
+#
+# The house upstream is 2.9 Mbps, so uploading the analysis from the NAS costs
+# hours of saturated upload every day. Twitch already holds the footage, so a
+# runner fetches it cloud-to-cloud, analyses it here, and writes the result
+# straight to Drive - the home connection is never involved.
+#
+# No camera access and no Tailscale: this job only needs Twitch (public) and
+# the Drive credentials. That is why it is separate from the stream workflow.
+
+on:
+  schedule:
+    - cron: '20 */3 * * *'      # every 3 hours, offset so it never collides
+  workflow_dispatch:            # with the stream workflow's 6-hourly start
+    inputs:
+      day:
+        description: "Day to build (YYYY-MM-DD). Blank = today."
+        required: false
+      window_hours:
+        description: "How far back to look for new VODs (default 4)."
+        required: false
+
+# Never overlap: a second copy would fight the first over the Drive cache.
+concurrency:
+  group: camera-summary
+  cancel-in-progress: false
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          # tesseract reads the camera name and the burnt-in clock out of the
+          # mosaic; without it the analyser cannot tell the panes apart.
+          sudo apt-get install -y ffmpeg tesseract-ocr tesseract-ocr-eng
+          python3 -m pip install --break-system-packages \
+            opencv-python-headless numpy pytesseract yt-dlp
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+        run: |
+          if [ -z "$RCLONE_CONF" ]; then
+            echo "::error::RCLONE_CONF secret is not set - cannot reach Drive"
+            exit 1
+          fi
+          mkdir -p ~/.config/rclone
+          # Written straight from the secret; never echoed, and the file lives
+          # only for the life of this runner.
+          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+          rclone listremotes
+
+      - name: Build summary and publish to Drive
+        env:
+          TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL || 'elarathornfield168' }}
+          DAY: ${{ inputs.day }}
+          WINDOW_HOURS: ${{ inputs.window_hours || '4' }}
+          RCLONE_REMOTE: gdrive:camera_archive
+        run: python3 summary_job.py
+
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: summary-logs
+          path: archive/logs/
+          if-no-files-found: ignore
+          retention-days: 7
