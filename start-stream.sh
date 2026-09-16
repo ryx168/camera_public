@@ -165,20 +165,6 @@ get_online_cameras() {
 
 
 # Build FFmpeg filter for available cameras (UPDATED FOR LOWER RESOLUTION)
-# NOTE ON TIMING
-# overlay emits one output frame per CAMERA frame, and -r ${FRAME_RATE} then
-# labels those frames 20fps no matter how long they actually took to arrive.
-# Six cameras contending over the network deliver far fewer than 20fps, so a
-# segment came out as a time-lapse: measured against the burnt-in clock, 60
-# seconds of video carried anywhere from 4 to 19 minutes of real time, and
-# every event in the archive was filed minutes from where it happened.
-#
-# fps=${FRAME_RATE} on each camera fixes it at the source: frames are
-# duplicated to fill the real gaps between arrivals, so a second of video is a
-# second of wall clock. Measured on one camera, 30 seconds of output:
-#     nullsrc alone          41s of real time   1.37x fast
-#     realtime on the base   40s                1.33x  (the base was never it)
-#     fps on the camera      29s                1.00x
 build_filter_complex() {
     local count=$1
     shift
@@ -192,16 +178,16 @@ build_filter_complex() {
     case $count in
         1)
             # Single camera - full screen
-            filter="[0:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:flags=fast_bilinear [tmp]; \
+            filter="[0:v] setpts=PTS-STARTPTS, scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:flags=fast_bilinear [tmp]; \
                     [tmp] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
                     text='${names[0]} %{localtime}':x=10:y=10:fontcolor=white:fontsize=16:box=1:boxcolor=black@0.5:boxborderw=2 [out]"
             ;;
         2)
             # Two cameras - side by side
             local half_width=$((OUTPUT_WIDTH / 2))
-            filter="[0:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${OUTPUT_HEIGHT}:flags=fast_bilinear [cam0]; \
-                    [1:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${OUTPUT_HEIGHT}:flags=fast_bilinear [cam1]; \
-                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT}:r=${FRAME_RATE} [base]; \
+            filter="[0:v] setpts=PTS-STARTPTS, scale=${half_width}:${OUTPUT_HEIGHT}:flags=fast_bilinear [cam0]; \
+                    [1:v] setpts=PTS-STARTPTS, scale=${half_width}:${OUTPUT_HEIGHT}:flags=fast_bilinear [cam1]; \
+                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
                     [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
                     [tmp1][cam1] overlay=eof_action=repeat:x=${half_width}:y=0 [tmp2]; \
                     [tmp2] drawtext=fontfile=/usr/share/fonts/freefont/FreeSans.ttf: \
@@ -213,10 +199,10 @@ build_filter_complex() {
             # Three cameras - 2 top, 1 bottom
             local half_width=$((OUTPUT_WIDTH / 2))
             local half_height=$((OUTPUT_HEIGHT / 2))
-            filter="[0:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam0]; \
-                    [1:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam1]; \
-                    [2:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${OUTPUT_WIDTH}:${half_height}:flags=fast_bilinear [cam2]; \
-                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT}:r=${FRAME_RATE} [base]; \
+            filter="[0:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam0]; \
+                    [1:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam1]; \
+                    [2:v] setpts=PTS-STARTPTS, scale=${OUTPUT_WIDTH}:${half_height}:flags=fast_bilinear [cam2]; \
+                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
                     [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
                     [tmp1][cam1] overlay=eof_action=repeat:x=${half_width}:y=0 [tmp2]; \
                     [tmp2][cam2] overlay=eof_action=repeat:x=0:y=${half_height} [tmp3]; \
@@ -231,11 +217,11 @@ build_filter_complex() {
             # Four cameras - 2x2 grid
             local half_width=$((OUTPUT_WIDTH / 2))
             local half_height=$((OUTPUT_HEIGHT / 2))
-            filter="[0:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam0]; \
-                    [1:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam1]; \
-                    [2:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam2]; \
-                    [3:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam3]; \
-                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT}:r=${FRAME_RATE} [base]; \
+            filter="[0:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam0]; \
+                    [1:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam1]; \
+                    [2:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam2]; \
+                    [3:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam3]; \
+                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
                     [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
                     [tmp1][cam1] overlay=eof_action=repeat:x=${half_width}:y=0 [tmp2]; \
                     [tmp2][cam2] overlay=eof_action=repeat:x=0:y=${half_height} [tmp3]; \
@@ -254,12 +240,12 @@ build_filter_complex() {
             local third_width=$((OUTPUT_WIDTH / 3))
             local half_width=$((OUTPUT_WIDTH / 2))
             local half_height=$((OUTPUT_HEIGHT / 2))
-            filter="[0:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam0]; \
-                    [1:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam1]; \
-                    [2:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam2]; \
-                    [3:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam3]; \
-                    [4:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${half_width}:${half_height}:flags=fast_bilinear [cam4]; \
-                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT}:r=${FRAME_RATE} [base]; \
+            filter="[0:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam0]; \
+                    [1:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam1]; \
+                    [2:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam2]; \
+                    [3:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam3]; \
+                    [4:v] setpts=PTS-STARTPTS, scale=${half_width}:${half_height}:flags=fast_bilinear [cam4]; \
+                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
                     [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
                     [tmp1][cam1] overlay=eof_action=repeat:x=${third_width}:y=0 [tmp2]; \
                     [tmp2][cam2] overlay=eof_action=repeat:x=$((third_width * 2)):y=0 [tmp3]; \
@@ -280,13 +266,13 @@ build_filter_complex() {
             # Six cameras - 3 top, 3 bottom
             local third_width=$((OUTPUT_WIDTH / 3))
             local half_height=$((OUTPUT_HEIGHT / 2))
-            filter="[0:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam0]; \
-                    [1:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam1]; \
-                    [2:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam2]; \
-                    [3:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam3]; \
-                    [4:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam4]; \
-                    [5:v] setpts=PTS-STARTPTS, fps=${FRAME_RATE}, scale=${third_width}:${half_height}:flags=fast_bilinear [cam5]; \
-                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT}:r=${FRAME_RATE} [base]; \
+            filter="[0:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam0]; \
+                    [1:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam1]; \
+                    [2:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam2]; \
+                    [3:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam3]; \
+                    [4:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam4]; \
+                    [5:v] setpts=PTS-STARTPTS, scale=${third_width}:${half_height}:flags=fast_bilinear [cam5]; \
+                    nullsrc=size=${OUTPUT_WIDTH}x${OUTPUT_HEIGHT} [base]; \
                     [base][cam0] overlay=eof_action=repeat:x=0:y=0 [tmp1]; \
                     [tmp1][cam1] overlay=eof_action=repeat:x=${third_width}:y=0 [tmp2]; \
                     [tmp2][cam2] overlay=eof_action=repeat:x=$((third_width * 2)):y=0 [tmp3]; \
