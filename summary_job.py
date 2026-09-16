@@ -82,6 +82,28 @@ def pull_state(day):
            day, "restored" if have else "none (first run for this day)"))
 
 
+def drive_folder_id(day):
+    """The day's Drive folder id, written out for the email step to link to.
+
+    Only the id is recorded. Opening that URL still requires access to the
+    account, so this shares nothing and makes nothing public.
+    """
+    r = run(["rclone", "lsjson", "--dirs-only", "%s/daily" % REMOTE]
+            + RCLONE_NET, capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        return ""
+    try:
+        for d in json.loads(r.stdout.decode("utf-8", "replace")):
+            if d.get("Name") == day and d.get("ID"):
+                path = os.path.join(STATE, "drive_folder_id.txt")
+                with open(path, "w") as f:
+                    f.write(d["ID"])
+                return d["ID"]
+    except Exception as e:
+        log("could not read drive folder id: %s" % e)
+    return ""
+
+
 def push_state(day):
     rclone(["copy", INDEX, "%s/state" % REMOTE])
     rclone(["copy", os.path.join(DAILY, day), "%s/daily/%s" % (REMOTE, day),
@@ -182,7 +204,9 @@ def main():
     build_daily.build_day(day)
 
     push_state(day)
-    log("=== published %s to %s/daily/%s ===" % (day, REMOTE, day))
+    fid = drive_folder_id(day)
+    log("=== published %s to %s/daily/%s%s ==="
+        % (day, REMOTE, day, " (folder %s)" % fid if fid else ""))
     return 0
 
 

@@ -71,6 +71,30 @@ jobs:
           RCLONE_REMOTE: gdrive:camera_archive
         run: python3 summary_job.py
 
+      - name: Email the summary
+        if: always()
+        env:
+          DAY: ${{ inputs.day }}
+          SES_SMTP_HOST: ${{ secrets.SES_SMTP_HOST }}
+          SES_SMTP_PORT: ${{ secrets.SES_SMTP_PORT }}
+          SES_SMTP_USER: ${{ secrets.SES_SMTP_USER }}
+          SES_SMTP_PASS: ${{ secrets.SES_SMTP_PASS }}
+          SES_SMTP_FROM: ${{ secrets.SES_SMTP_FROM }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME || secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+        run: |
+          # The report is already on Drive by now, so a mail failure must not
+          # fail the run - the script warns and exits 0 on its own.
+          if [ -f archive/state/drive_folder_id.txt ]; then
+            export DRIVE_FOLDER_ID="$(cat archive/state/drive_folder_id.txt)"
+          fi
+          python3 summary_email.py
+
       - name: Upload run log
         if: always()
         uses: actions/upload-artifact@v4
