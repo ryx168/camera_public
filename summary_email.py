@@ -135,8 +135,13 @@ def main():
     host = env("SES_SMTP_HOST", "SMTP_HOST", "SMTP_SERVER")
     user = env("SES_SMTP_USER", "SMTP_USERNAME", "SMTP_USER")
     pw = env("SES_SMTP_PASS", "SMTP_PASSWORD", "SMTP_PASS")
-    frm = env("SES_SMTP_FROM", "SMTP_FROM")
     to = env("ALERT_TO", "SMTP_TO")
+    # Precedence matters here. The motion-check job that worked used SMTP_FROM
+    # and, when that was empty, fell back to the recipient's own address - an
+    # identity SES has verified. Preferring SES_SMTP_FROM instead got the send
+    # rejected with 554 "Email address is not verified", so follow what is
+    # known to deliver and fall back to the recipient the same way.
+    frm = env("SMTP_FROM", "SES_SMTP_FROM") or to
     port = int(env("SES_SMTP_PORT", "SMTP_PORT") or 587)
     if not all([host, user, pw, frm, to]):
         print("::warning::SMTP not configured - summary email skipped")
@@ -166,12 +171,34 @@ def main():
         except Exception as e:
             print("  could not attach %s: %s" % (os.path.basename(p), e))
 
+    def deliver(sender_hdr, sender_env):
+        with smtplib.SMTP(host, port, timeout=30) as srv:
+            srv.starttls()
+            srv.login(user, pw)
+            del msg["From"]
+            msg["From"] = sender_hdr
+            srv.sendmail(sender_env, rcpt_envs, msg.as_string())
+
     try:
-        with smtplib.SMTP(host, port, timeout=30) as s:
-            s.starttls()
-            s.login(user, pw)
-            s.sendmail(from_env, rcpt_envs, msg.as_string())
+        deliver(from_hdr, from_env)
         print("summary email sent to %s" % ", ".join(rcpt_envs))
+    except smtplib.SMTPSenderRefused as e:
+        # SES refuses a From it has not verified. The recipient address is
+        # necessarily verified (it receives), so retry as that rather than
+        # losing the mail over a configuration detail.
+        alt = rcpt_envs[0] if rcpt_envs else None
+        if alt and alt != from_env and b"not verified" in (e.smtp_error or b""):
+            print("sender %s is not a verified identity - retrying as %s"
+                  % (from_env, alt))
+            try:
+                deliver(alt, alt)
+                print("summary email sent to %s (from %s)"
+                      % (", ".join(rcpt_envs), alt))
+                return 0
+            except Exception as e2:
+                print("::warning::retry also failed: %s" % e2)
+        else:
+            print("::warning::summary email failed: %s" % e)
     except Exception as e:
         # Never fail the workflow over email: the report is already on Drive.
         print("::warning::summary email failed: %s" % e)
