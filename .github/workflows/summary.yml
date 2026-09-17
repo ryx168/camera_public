@@ -12,25 +12,23 @@ name: Camera Summary
 
 on:
   schedule:
-    # Every 15 minutes. A job cannot simply stay running - Actions caps at 6
-    # hours and there is no way to hold one open - so frequent short runs are
-    # the closest thing to continuous. Each run only decodes VODs that are not
-    # already in the cache, so a short cadence is cheap.
+    # Every 6 hours, the same shape as the stream workflow - one long job that
+    # holds itself open, started by a cron that only has to fire occasionally.
     #
-    # Do not trust this cadence, and do not try to tune it. Measured over two
-    # days, this repository is granted about five scheduled runs a DAY no
-    # matter what the cron says - the ticks are not delayed, they are silently
-    # discarded. The stream workflow asks for one run every 6 hours and gets
-    # the same ~4-5 hour spacing, so the budget is per repository, not per
-    # schedule.
+    # Asking for a run every 15 minutes does not work and cannot be tuned into
+    # working. Measured over two days, this repository is granted about five
+    # scheduled runs a DAY whatever the cron says: the ticks are not delayed,
+    # they are silently discarded. The stream workflow asks for one run every
+    # 6 hours and gets the same ~4-5 hour spacing, so the budget belongs to the
+    # repository, not to the schedule.
     #
-    # The cadence therefore comes from inside the job: one run analyses on a
-    # loop for hours (see "Analyse on a loop" below), the way the stream
-    # workflow holds a single long job open. This cron only has to start one.
-    # It stays at 15 minutes because a tick arriving while a loop is running
-    # queues instead of being dropped, and then starts the moment the loop
-    # ends - which is what makes the coverage continuous.
-    - cron: '*/15 * * * *'
+    # The 15-minute cadence therefore lives inside the job instead - see
+    # "Analyse on a loop" below. This cron only has to start one.
+    #
+    # Offset from the stream workflow's '0 */6' so the two do not start
+    # together. A tick arriving while a loop is still running is not wasted: it
+    # queues (see cancel-in-progress) and begins the moment the loop ends.
+    - cron: '20 */6 * * *'
   workflow_dispatch:
     inputs:
       day:
