@@ -17,11 +17,19 @@ on:
     # the closest thing to continuous. Each run only decodes VODs that are not
     # already in the cache, so a short cadence is cheap.
     #
-    # Do not trust this cadence. It is a request, not a promise: on 2026-09-17
-    # GitHub delivered four of these in nineteen hours. The job must therefore
-    # be written so that a missed tick costs nothing, and it is - a run fetches
-    # whatever is missing from the cache rather than whatever is recent, so any
-    # length of outage is made good by the next run that does arrive.
+    # Do not trust this cadence, and do not try to tune it. Measured over two
+    # days, this repository is granted about five scheduled runs a DAY no
+    # matter what the cron says - the ticks are not delayed, they are silently
+    # discarded. The stream workflow asks for one run every 6 hours and gets
+    # the same ~4-5 hour spacing, so the budget is per repository, not per
+    # schedule.
+    #
+    # The cadence therefore comes from inside the job: one run analyses on a
+    # loop for hours (see "Analyse on a loop" below), the way the stream
+    # workflow holds a single long job open. This cron only has to start one.
+    # It stays at 15 minutes because a tick arriving while a loop is running
+    # queues instead of being dropped, and then starts the moment the loop
+    # ends - which is what makes the coverage continuous.
     - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
@@ -35,6 +43,9 @@ on:
         description: "Discard the day's cache and analyse it again from scratch"
         type: boolean
         default: false
+      loop_minutes:
+        description: "How long to keep analysing. 0 = a single pass and exit."
+        required: false
 
 # Never overlap: a second copy would fight the first over the Drive cache.
 concurrency:
@@ -46,6 +57,8 @@ concurrency:
   #
   # This cannot pile up: GitHub keeps at most one pending run per concurrency
   # group and discards the older one, so the queue is never deeper than one.
+  # That single pending run is load-bearing here - it is what takes over the
+  # instant the current loop exits.
   cancel-in-progress: false
 
 # The site deploy needs these; the build job itself only reads the repo.
@@ -63,7 +76,9 @@ jobs:
     # happened on the first two runs. camera-access has no protection rules,
     # so this adds no approval step.
     environment: camera-access
-    timeout-minutes: 90
+    # The loop below stops at LOOP_MINUTES; this only has to leave room for
+    # the publish steps that follow it. Actions hard-caps a job at 6 hours.
+    timeout-minutes: 355
     # Tells the deploy job whether there is anything to deploy. Without it the
     # deploy runs on a cancelled or failed run, finds no artifact, and posts a
     # red failed deployment - which at this cadence happens constantly, because
@@ -138,7 +153,7 @@ jobs:
           echo "remotes found:"
           rclone listremotes
 
-      - name: Build summary and publish to Drive
+      - name: Analyse on a loop
         env:
           TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL || 'elarathornfield168' }}
           DAY: ${{ inputs.day }}
@@ -147,7 +162,45 @@ jobs:
           WINDOW_HOURS: ${{ inputs.window_hours }}
           REBUILD: ${{ inputs.rebuild && '1' || '0' }}
           RCLONE_REMOTE: gdrive:camera_archive
-        run: python3 summary_job.py
+          LOOP_MINUTES: ${{ inputs.loop_minutes || '330' }}
+          INTERVAL_MINUTES: '15'
+        run: |
+          set -u
+          # One long job analysing every 15 minutes, because the scheduler
+          # cannot be relied on to start a short one that often. A pass that
+          # fails must not end the loop - the next pass simply picks up what
+          # the failed one did not cache.
+          if [ "$LOOP_MINUTES" = "0" ]; then
+            echo "single pass requested"
+            python3 summary_job.py
+            exit 0
+          fi
+
+          end=$(( $(date +%s) + LOOP_MINUTES * 60 ))
+          pass=0
+          while [ "$(date +%s)" -lt "$end" ]; do
+            pass=$(( pass + 1 ))
+            started=$(date +%s)
+            echo "::group::pass $pass  $(date '+%H:%M %Z')"
+            # Only the final pass writes the digest onto the run page; every
+            # pass appending would blow the step-summary size limit.
+            GITHUB_STEP_SUMMARY="" python3 summary_job.py               || echo "::warning::pass $pass failed - continuing"
+            echo "::endgroup::"
+
+            took=$(( $(date +%s) - started ))
+            left=$(( end - $(date +%s) ))
+            [ "$left" -le 0 ] && break
+            # Pace from the start of the pass, so a slow pass does not push
+            # the whole schedule later and later.
+            nap=$(( INTERVAL_MINUTES * 60 - took ))
+            [ "$nap" -lt 30 ] && nap=30
+            [ "$nap" -gt "$left" ] && nap=$left
+            echo "pass $pass took ${took}s - next in ${nap}s"
+            sleep "$nap"
+          done
+
+          echo "loop finished after $pass pass(es) - final pass"
+          python3 summary_job.py
 
       - name: Email the summary
         if: always()
