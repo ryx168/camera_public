@@ -31,17 +31,35 @@ import subprocess
 CHANNEL = os.environ.get("TWITCH_CHANNEL", "elarathornfield168")
 BASE = os.environ.get("ARCHIVE_BASE", os.path.abspath("archive"))
 REMOTE = os.environ.get("RCLONE_REMOTE", "gdrive:camera_archive")
-# How far back to look. Must exceed the gap between runs or footage falls
-# straight through it - and the gap is not the cron interval. The schedule asks
-# for every 15 minutes; GitHub actually delivered runs 2 to 5 hours apart:
+# Which clips a run picks up.
 #
-#     22:55 -> 01:04 -> 06:07 -> 11:38 UTC
+# This used to be a look-back window in hours, and that is what emptied a whole
+# day's page. The schedule asks for a run every 15 minutes; on 2026-09-17
+# GitHub delivered four runs in nineteen hours:
 #
-# A 2-hour window against a 5-hour gap loses most of the day, which is exactly
-# what happened - a whole day's page with 0 incidents on it. 8 hours covers the
-# worst observed gap with room to spare, and the overlap is nearly free:
-# anything already in the analysis cache is skipped without downloading.
-WINDOW_H = float(os.environ.get("WINDOW_HOURS", "8"))
+#     01:04 -> 06:07 -> 11:38 -> 15:42 UTC
+#
+# Against a 2-hour window, only 8 of those 19 hours were ever looked at. The
+# footage was fine - it simply fell between the windows, and nothing ever went
+# back for it.
+#
+# Widening the window only moves the cliff: any fixed number can be exceeded by
+# a long enough outage, and when it is, that footage is lost for good. So the
+# question is no longer "what happened in the last N hours" (a clock, which can
+# be wrong) but "what have I not analysed yet" (a fact, which cannot). Every
+# VOD for the day that is missing from the cache is fetched, however old, so an
+# outage of any length heals itself on the next run.
+#
+# WINDOW_HOURS remains as an optional limiter for a deliberately narrow manual
+# run. Blank - the default - means the whole day.
+_win = os.environ.get("WINDOW_HOURS", "").strip()
+WINDOW_H = float(_win) if _win else 0.0
+
+# The only thing a run really must not do is exceed the job timeout. A backlog
+# is bounded per run instead of by age: 258 clips took 30 minutes to fetch, so
+# this leaves room inside the 90-minute cap. Anything deferred is not lost - it
+# is still missing from the cache, so the next run is what picks it up.
+MAX_CLIPS = int(os.environ.get("MAX_CLIPS", "300"))
 
 CLIPS = os.path.join(BASE, "clips")
 DAILY = os.path.join(BASE, "daily")
@@ -179,8 +197,8 @@ def merge_index(new_rows):
 
 
 def download_window(rows, day):
-    """Fetch VODs inside the window that are not already analysed."""
-    cutoff = time.time() - WINDOW_H * 3600
+    """Fetch every VOD of this day that has not been analysed yet."""
+    cutoff = time.time() - WINDOW_H * 3600 if WINDOW_H else 0
     cache = {}
     try:
         cache = json.load(open(os.path.join(DAILY, day, "analysis.json")))
@@ -193,8 +211,20 @@ def download_window(rows, day):
             and datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d") == day
             and vid not in cache]
     if not want:
-        log("no new VODs in the last %gh" % WINDOW_H)
+        log("nothing unanalysed for %s - %d clips already cached"
+            % (day, len(cache)))
         return 0
+
+    want.sort()
+    if len(want) > MAX_CLIPS:
+        # Newest first: the top of the page should be current even while a
+        # backlog is still draining. The rest stay uncached and are picked up
+        # by the following run, so nothing is dropped.
+        log("backlog of %d clips - taking the newest %d, the rest follow on "
+            "the next run" % (len(want), MAX_CLIPS))
+        want = want[-MAX_CLIPS:]
+    log("%d clip%s to fetch for %s (%d already analysed)"
+        % (len(want), "" if len(want) == 1 else "s", day, len(cache)))
 
     out = os.path.join(CLIPS, day)
     os.makedirs(out, exist_ok=True)
@@ -210,7 +240,7 @@ def download_window(rows, day):
             got += 1
         else:
             log("  download failed: %s" % vid)
-    log("downloaded %d of %d new VODs in the window" % (got, len(want)))
+    log("downloaded %d of %d clips" % (got, len(want)))
     return got
 
 
@@ -265,8 +295,9 @@ def write_step_summary(day, fid):
 
 def main():
     day = os.environ.get("DAY") or datetime.date.today().strftime("%Y-%m-%d")
-    log("=== summary job for %s (channel=%s, window=%gh) ==="
-        % (day, CHANNEL, WINDOW_H))
+    log("=== summary job for %s (channel=%s, scope=%s) ==="
+        % (day, CHANNEL,
+           "last %gh" % WINDOW_H if WINDOW_H else "whole day, uncached only"))
     for d in (CLIPS, DAILY, STATE):
         os.makedirs(d, exist_ok=True)
 

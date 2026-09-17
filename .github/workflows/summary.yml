@@ -17,9 +17,11 @@ on:
     # the closest thing to continuous. Each run only decodes VODs that are not
     # already in the cache, so a short cadence is cheap.
     #
-    # GitHub delays or drops scheduled runs when it is busy, which is why the
-    # look-back window is far wider than the gap: missing a few ticks costs
-    # nothing because the next one picks the footage up.
+    # Do not trust this cadence. It is a request, not a promise: on 2026-09-17
+    # GitHub delivered four of these in nineteen hours. The job must therefore
+    # be written so that a missed tick costs nothing, and it is - a run fetches
+    # whatever is missing from the cache rather than whatever is recent, so any
+    # length of outage is made good by the next run that does arrive.
     - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
@@ -27,7 +29,7 @@ on:
         description: "Day to build (YYYY-MM-DD). Blank = today."
         required: false
       window_hours:
-        description: "How far back to look for new VODs (default 8)."
+        description: "Only look back this many hours. Blank = the whole day."
         required: false
       rebuild:
         description: "Discard the day's cache and analyse it again from scratch"
@@ -37,10 +39,14 @@ on:
 # Never overlap: a second copy would fight the first over the Drive cache.
 concurrency:
   group: camera-summary
-  # At a 15-minute cadence a slow run would otherwise queue behind the next
-  # tick and the backlog would grow. The newest run has the freshest footage
-  # and the cache makes it cheap, so let it take over.
-  cancel-in-progress: true
+  # Let a run finish. The analysis cache is only pushed to Drive at the end, so
+  # cancelling a run throws away every clip it downloaded and analysed - up to
+  # half an hour of work - and the next run has to do all of it again. That is
+  # how a cancelled run also came to post a failed Pages deployment.
+  #
+  # This cannot pile up: GitHub keeps at most one pending run per concurrency
+  # group and discards the older one, so the queue is never deeper than one.
+  cancel-in-progress: false
 
 # The site deploy needs these; the build job itself only reads the repo.
 permissions:
@@ -136,7 +142,9 @@ jobs:
         env:
           TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL || 'elarathornfield168' }}
           DAY: ${{ inputs.day }}
-          WINDOW_HOURS: ${{ inputs.window_hours || '8' }}
+          # Blank on a scheduled run: analyse everything for the day that
+          # is not cached yet, rather than a fixed slice of the clock.
+          WINDOW_HOURS: ${{ inputs.window_hours }}
           REBUILD: ${{ inputs.rebuild && '1' || '0' }}
           RCLONE_REMOTE: gdrive:camera_archive
         run: python3 summary_job.py
