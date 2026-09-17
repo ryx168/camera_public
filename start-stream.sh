@@ -364,6 +364,18 @@ start_ffmpeg() {
         done
         echo "$(date) - 📹 $cam_count 个画面位置，其中 $live_count 个摄像头在线" | tee -a "$LOG_FILE"
 
+        # Nothing to show. Every pane would be the placeholder tile, so the
+        # broadcast would be six black rectangles and the archive would fill
+        # with segments containing no picture at all. The guard above cannot
+        # catch this: cam_count is the number of PANES, and an offline camera
+        # still gets a pane, so it is 6 even when nothing is online.
+        # Not a failure and not counted as a retry - wait for the cameras.
+        if [ "$live_count" -eq 0 ]; then
+            echo "$(date) - ⏸ 所有摄像头离线 - 暂停录制，30秒后重试 (不推流全黑画面)" | tee -a "$LOG_FILE"
+            sleep 30
+            continue
+        fi
+
         # Create new timestamp for filename
         TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
         LOCAL_FILE="${LOCAL_DIR}/stream-${TIMESTAMP}.mp4"
