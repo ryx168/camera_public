@@ -58,6 +58,12 @@ jobs:
     # so this adds no approval step.
     environment: camera-access
     timeout-minutes: 90
+    # Tells the deploy job whether there is anything to deploy. Without it the
+    # deploy runs on a cancelled or failed run, finds no artifact, and posts a
+    # red failed deployment - which at this cadence happens constantly, because
+    # cancel-in-progress kills the previous run before it uploads anything.
+    outputs:
+      site: ${{ steps.site.outputs.has_site }}
     env:
       # Runners are UTC. Without this every timestamp in the report is seven
       # hours out, the half-hour buckets land in the wrong slots, and - worst -
@@ -172,14 +178,24 @@ jobs:
           retention-days: 30
 
       - name: Assemble the Pages site
+        id: site
         if: always()
         env:
           RCLONE_REMOTE: gdrive:camera_archive
           SITE_DAYS: '14'
-        run: python3 publish_site.py || echo "::warning::site not assembled"
+        run: |
+          python3 publish_site.py || echo "::warning::site not assembled"
+          # Only claim a site when there is actually a page in it. Uploading an
+          # empty directory would publish a site with nothing on it, replacing
+          # the good one from the previous run.
+          if [ -f site/index.html ]; then
+            echo "has_site=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no site/index.html - skipping the Pages deploy"
+          fi
 
       - name: Upload the Pages artifact
-        if: always()
+        if: steps.site.outputs.has_site == '1'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -195,7 +211,11 @@ jobs:
 
   publish:
     needs: summary
-    if: always()
+    # Deploy only when the build actually produced a site. always() here meant
+    # a cancelled run - the normal outcome when the next tick supersedes this
+    # one - went on to deploy nothing and failed with "No artifacts named
+    # github-pages were found", turning routine supersession into a red run.
+    if: needs.summary.outputs.site == '1'
     runs-on: ubuntu-latest
     env:
       TZ: America/Vancouver
