@@ -54,7 +54,7 @@ def data_uri(path):
             mime, base64.b64encode(f.read()).decode("ascii"))
 
 
-def build(day, drive_id=""):
+def build(day, drive_id="", for_web=False):
     summ = os.path.join(BASE, "daily", day, "summary")
     src = os.path.join(summ, "summary.html")
     if not os.path.exists(src):
@@ -64,7 +64,7 @@ def build(day, drive_id=""):
 
     # ---- stylesheet ----
     css_path = os.path.join(summ, "style.css")
-    if os.path.exists(css_path):
+    if os.path.exists(css_path) and not for_web:
         css = open(css_path, encoding="utf-8").read()
         html = re.sub(r'<link[^>]*href="style\.css"[^>]*>',
                       "<style>\n%s\n</style>" % css, html, count=1)
@@ -80,13 +80,16 @@ def build(day, drive_id=""):
         if frames:
             slot = os.path.splitext(frames[-1])[0]
             label = "%s:%s" % (slot[:2], slot[2:]) if len(slot) == 4 else slot
+            
+            latest_uri = data_uri(os.path.join(hours, frames[-1])) if not for_web else "../hours/" + frames[-1]
+            
             latest = ('<h2>Latest frame</h2>'
                       '<p class=sub>Mosaic at %s &mdash; a snapshot from the last '
                       'analysed slot.</p>'
                       '<img src="%s" alt="latest mosaic" '
                       'style="width:100%%;max-width:760px;border-radius:10px;'
                       'border:1px solid var(--line, #e6e2db)">'
-                      % (label, data_uri(os.path.join(hours, frames[-1]))))
+                      % (label, latest_uri))
     # On a real domain the Twitch player CAN be embedded - the reason it never
     # worked from the NAS is that Twitch refuses a bare IP as parent=, and
     # ryx168.github.io is not one. So offer the live stream where it can work
@@ -141,7 +144,8 @@ def build(day, drive_id=""):
         missing += 1
         return 'src="%s"' % PLACEHOLDER
 
-    html = re.sub(r'src="((?:thumbs/|contact_sheet)[^"]*)"', embed, html)
+    if not for_web:
+        html = re.sub(r'src="((?:thumbs/|contact_sheet)[^"]*)"', embed, html)
 
     # ---- links ----
     # Cards point at activity/*.mp4, far too large to embed, so the clips stay
@@ -186,17 +190,18 @@ def build(day, drive_id=""):
     banner += "</p>"
     html = re.sub(r"(<div class=wrap id=top>)", r"\1" + banner, html, count=1)
 
-    dst = os.path.join(summ, "summary-%s.html" % day)
+    suffix = "-web" if for_web else ""
+    dst = os.path.join(summ, "summary-%s%s.html" % (day, suffix))
     with open(dst, "w", encoding="utf-8") as f:
         f.write(html)
 
     print("  cards: %d linked to Drive, %d without a clip id"
           % (linked[0], inert[0]))
     mb = os.path.getsize(dst) / 1e6
-    print("standalone: %s (%.1f MB, %d images embedded%s)"
-          % (os.path.basename(dst), mb, embedded,
+    print("standalone%s: %s (%.1f MB, %d images embedded%s)"
+          % (" (web)" if for_web else "", os.path.basename(dst), mb, embedded,
              ", %d missing" % missing if missing else ""))
-    if mb > MAX_MB:
+    if mb > MAX_MB and not for_web:
         print("::warning::standalone page is %.1f MB, over the %g MB guide"
               % (mb, MAX_MB))
     return dst
@@ -206,4 +211,8 @@ if __name__ == "__main__":
     d = (sys.argv[1] if len(sys.argv) > 1
          else os.environ.get("DAY")
          or datetime.date.today().strftime("%Y-%m-%d"))
-    sys.exit(0 if build(d, os.environ.get("DRIVE_FOLDER_ID", "")) else 1)
+    
+    drive_id = os.environ.get("DRIVE_FOLDER_ID", "")
+    ok1 = build(d, drive_id, for_web=False)
+    ok2 = build(d, drive_id, for_web=True)
+    sys.exit(0 if (ok1 and ok2) else 1)

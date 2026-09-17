@@ -168,6 +168,10 @@ jobs:
           # cannot be relied on to start a short one that often. A pass that
           # fails must not end the loop - the next pass simply picks up what
           # the failed one did not cache.
+          
+          # Clone the gh-pages branch so we have git history for the site
+          git clone --branch gh-pages https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git site || mkdir -p site
+          
           if [ "$LOOP_MINUTES" = "0" ]; then
             echo "single pass requested"
             python3 summary_job.py
@@ -183,6 +187,24 @@ jobs:
             # Only the final pass writes the digest onto the run page; every
             # pass appending would blow the step-summary size limit.
             GITHUB_STEP_SUMMARY="" python3 summary_job.py               || echo "::warning::pass $pass failed - continuing"
+            
+            # Assembly and push inside the loop
+            python3 publish_site.py || echo "::warning::site not assembled"
+            if [ -f site/index.html ]; then
+              cd site
+              if [ ! -d .git ]; then
+                git init
+                git checkout -b gh-pages
+                git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+              fi
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git add .
+              git commit -m "Update site: pass $pass" || true
+              git push origin gh-pages || echo "::warning::failed to push site"
+              cd ..
+            fi
+            
             echo "::endgroup::"
 
             took=$(( $(date +%s) - started ))
@@ -199,6 +221,22 @@ jobs:
 
           echo "loop finished after $pass pass(es) - final pass"
           python3 summary_job.py
+          
+          python3 publish_site.py || echo "::warning::site not assembled"
+          if [ -f site/index.html ]; then
+            cd site
+            if [ ! -d .git ]; then
+              git init
+              git checkout -b gh-pages
+              git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "Update site: final pass" || true
+            git push origin gh-pages || echo "::warning::failed to push site"
+            cd ..
+          fi
 
       - name: Email the summary
         if: always()
@@ -236,29 +274,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Assemble the Pages site
-        id: site
-        if: always()
-        env:
-          RCLONE_REMOTE: gdrive:camera_archive
-          SITE_DAYS: '14'
-        run: |
-          python3 publish_site.py || echo "::warning::site not assembled"
-          # Only claim a site when there is actually a page in it. Uploading an
-          # empty directory would publish a site with nothing on it, replacing
-          # the good one from the previous run.
-          if [ -f site/index.html ]; then
-            echo "has_site=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::no site/index.html - skipping the Pages deploy"
-          fi
-
-      - name: Upload the Pages artifact
-        if: steps.site.outputs.has_site == '1'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
       - name: Upload run log
         if: always()
         uses: actions/upload-artifact@v4
@@ -267,23 +282,3 @@ jobs:
           path: archive/logs/
           if-no-files-found: ignore
           retention-days: 7
-
-  publish:
-    needs: summary
-    # Deploy only when the build actually produced a site. always() here meant
-    # a cancelled run - the normal outcome when the next tick supersedes this
-    # one - went on to deploy nothing and failed with "No artifacts named
-    # github-pages were found", turning routine supersession into a red run.
-    if: needs.summary.outputs.site == '1'
-    runs-on: ubuntu-latest
-    env:
-      TZ: America/Vancouver
-    # Must be github-pages, and a job can only have one environment - which is
-    # why this is separate from the build job rather than another step in it.
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4

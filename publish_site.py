@@ -78,9 +78,24 @@ def collect():
     local = os.path.join(BASE, "daily")
     if os.path.isdir(local):
         for day in os.listdir(local):
-            src = os.path.join(local, day, "summary", "summary-%s.html" % day)
+            summ_dir = os.path.join(local, day, "summary")
+            src_web = os.path.join(summ_dir, "summary-%s-web.html" % day)
+            src_std = os.path.join(summ_dir, "summary-%s.html" % day)
+            src = src_web if os.path.exists(src_web) else src_std
+            
             if os.path.exists(src) and day >= cutoff:
                 shutil.copy2(src, os.path.join(SITE, "%s.html" % day))
+                
+                # Copy style.css if it exists
+                css_src = os.path.join(summ_dir, "style.css")
+                if os.path.exists(css_src):
+                    shutil.copy2(css_src, os.path.join(SITE, "style.css"))
+                
+                # Copy thumbs directory
+                thumbs_src = os.path.join(summ_dir, "thumbs")
+                if os.path.isdir(thumbs_src):
+                    shutil.copytree(thumbs_src, os.path.join(SITE, "thumbs"), dirs_exist_ok=True)
+
 
     # Earlier days from Drive, so the site keeps history rather than showing
     # only today. Copied one day at a time with copyto: rclone has no flag to
