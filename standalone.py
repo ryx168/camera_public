@@ -12,8 +12,10 @@ and no folder structure around it.
 
 What cannot come along is rewritten rather than left broken:
 
-  * the "Live now" tile polls the NAS, so it becomes a still of the
-    most recent mosaic frame instead
+  * the "Live now" tile polled the NAS. On a real domain the Twitch player
+    embeds fine - Twitch only refuses a bare IP as parent=, which is what the
+    NAS was - so the live stream is offered there, with the most recent mosaic
+    frame as the fallback for a saved copy
   * incident cards link to activity/*.mp4, which are tens of gigabytes and
     stay on Drive - each card is repointed at that clip's Drive file, so
     clicking a thumbnail still plays the footage
@@ -29,6 +31,7 @@ import datetime
 BASE = os.environ.get("ARCHIVE_BASE", os.path.abspath("archive"))
 # Refuse to emit something an inbox or Drive preview will choke on.
 MAX_MB = float(os.environ.get("STANDALONE_MAX_MB", "40"))
+CHANNEL = os.environ.get("TWITCH_CHANNEL", "elarathornfield168")
 
 
 # A neutral tile, inline, for a thumbnail that could not be embedded. Never a
@@ -78,13 +81,47 @@ def build(day, drive_id=""):
             slot = os.path.splitext(frames[-1])[0]
             label = "%s:%s" % (slot[:2], slot[2:]) if len(slot) == 4 else slot
             latest = ('<h2>Latest frame</h2>'
-                      '<p class=sub>Mosaic at %s. This is a snapshot, not a '
-                      'live feed &mdash; the live view needs the NAS.</p>'
+                      '<p class=sub>Mosaic at %s &mdash; a snapshot from the last '
+                      'analysed slot.</p>'
                       '<img src="%s" alt="latest mosaic" '
                       'style="width:100%%;max-width:760px;border-radius:10px;'
                       'border:1px solid var(--line, #e6e2db)">'
                       % (label, data_uri(os.path.join(hours, frames[-1]))))
-    html = re.sub(r"<h2>Live now</h2>.*?</script>", latest, html,
+    # On a real domain the Twitch player CAN be embedded - the reason it never
+    # worked from the NAS is that Twitch refuses a bare IP as parent=, and
+    # ryx168.github.io is not one. So offer the live stream where it can work
+    # and fall back to the still where it cannot (a downloaded copy on file://,
+    # or any host Twitch will not accept).
+    live = ('<h2>Live now</h2>'
+            '<div id="lvbox" style="display:none;position:relative;'
+            'aspect-ratio:8/3;max-width:760px;background:#000;'
+            'border-radius:10px;overflow:hidden">'
+            '<iframe id="lvfr" title="Live stream" allowfullscreen '
+            'frameborder="0" scrolling="no" '
+            'style="position:absolute;inset:0;width:100%%;height:100%%;'
+            'border:0"></iframe></div>'
+            '<div id="lvalt">%s</div>'
+            '<script>(function(){'
+            'var h=location.hostname;'
+            # A hostname with a dot that is not an IPv4 literal. Twitch accepts
+            # a domain and refuses a bare address - which is exactly why this
+            # never worked when the page was served from the NAS.
+            r'if(h&&h.indexOf(".")>0&&!/^\d+\.\d+\.\d+\.\d+$/.test(h)){'
+            'document.getElementById("lvfr").src='
+            '"https://player.twitch.tv/?channel=%s&muted=true&parent="'
+            '+encodeURIComponent(h);'
+            'document.getElementById("lvbox").style.display="block";'
+            'document.getElementById("lvalt").style.display="none";}'
+            '})();</script>'
+            '<p class=sub>Live from Twitch when this page is opened on a '
+            'website; a saved copy shows the snapshot instead. '
+            '<a href="https://twitch.tv/%s" target="_blank" rel="noopener">'
+            'Open on Twitch</a></p>'
+            % (latest, CHANNEL, CHANNEL))
+    # A plain string replacement would be parsed as a template and the \d in
+    # the IPv4 test above would raise "bad escape". A function is passed
+    # through untouched.
+    html = re.sub(r"<h2>Live now</h2>.*?</script>", lambda _m: live, html,
                   flags=re.S, count=1)
 
     # ---- images become data URIs ----

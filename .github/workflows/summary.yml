@@ -27,7 +27,7 @@ on:
         description: "Day to build (YYYY-MM-DD). Blank = today."
         required: false
       window_hours:
-        description: "How far back to look for new VODs (default 2)."
+        description: "How far back to look for new VODs (default 8)."
         required: false
       rebuild:
         description: "Discard the day's cache and analyse it again from scratch"
@@ -130,7 +130,7 @@ jobs:
         env:
           TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL || 'elarathornfield168' }}
           DAY: ${{ inputs.day }}
-          WINDOW_HOURS: ${{ inputs.window_hours || '2' }}
+          WINDOW_HOURS: ${{ inputs.window_hours || '8' }}
           REBUILD: ${{ inputs.rebuild && '1' || '0' }}
           RCLONE_REMOTE: gdrive:camera_archive
         run: python3 summary_job.py

@@ -31,12 +31,17 @@ import subprocess
 CHANNEL = os.environ.get("TWITCH_CHANNEL", "elarathornfield168")
 BASE = os.environ.get("ARCHIVE_BASE", os.path.abspath("archive"))
 REMOTE = os.environ.get("RCLONE_REMOTE", "gdrive:camera_archive")
-# How far back to look. Must comfortably exceed the gap between runs or
-# footage falls straight through it. At a 15-minute cadence 2 hours covers
-# roughly eight missed ticks, which matters because GitHub delays or drops
-# scheduled runs under load. The overlap is nearly free: anything already in
-# the analysis cache is skipped without being downloaded again.
-WINDOW_H = float(os.environ.get("WINDOW_HOURS", "2"))
+# How far back to look. Must exceed the gap between runs or footage falls
+# straight through it - and the gap is not the cron interval. The schedule asks
+# for every 15 minutes; GitHub actually delivered runs 2 to 5 hours apart:
+#
+#     22:55 -> 01:04 -> 06:07 -> 11:38 UTC
+#
+# A 2-hour window against a 5-hour gap loses most of the day, which is exactly
+# what happened - a whole day's page with 0 incidents on it. 8 hours covers the
+# worst observed gap with room to spare, and the overlap is nearly free:
+# anything already in the analysis cache is skipped without downloading.
+WINDOW_H = float(os.environ.get("WINDOW_HOURS", "8"))
 
 CLIPS = os.path.join(BASE, "clips")
 DAILY = os.path.join(BASE, "daily")
