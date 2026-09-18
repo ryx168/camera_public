@@ -61,7 +61,7 @@ concurrency:
 
 # The site deploy needs these; the build job itself only reads the repo.
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
