@@ -1,0 +1,69 @@
+name: Camera Check
+
+# On-demand reachability check for all six cameras, over the same Tailscale
+# path the stream uses. Deliberately separate from the stream workflow: running
+# that one restarts a multi-hour broadcast, which is far too heavy a way to ask
+# "are my cameras up right now?".
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_email:
+        description: "Send a sample alert even if every camera is reachable"
+        type: boolean
+        default: false
+
+# Its own group, so checking cameras never cancels a running stream.
+concurrency:
+  group: camera-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: camera-access
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:shared
+          hostname: github-camera-check
+          args: --accept-routes
+
+      - name: Wait for subnet routes
+        run: |
+          for i in {1..24}; do
+            ip route show table all | grep -q "192.168.1" && { echo "routes up"; exit 0; }
+            sleep 5
+          done
+          echo "routes never appeared"; tailscale status; exit 1
+
+      - name: Probe cameras and alert
+        env:
+          CAM_PASS: ${{ secrets.CAM_PASS }}
+          WYZE_PASS: ${{ secrets.WYZE_PASS }}
+          FORCE_TEST: ${{ inputs.test_email && '1' || '0' }}
+          SES_SMTP_HOST: ${{ secrets.SES_SMTP_HOST }}
+          SES_SMTP_PORT: ${{ secrets.SES_SMTP_PORT }}
+          SES_SMTP_USER: ${{ secrets.SES_SMTP_USER }}
+          SES_SMTP_PASS: ${{ secrets.SES_SMTP_PASS }}
+          SES_SMTP_FROM: ${{ secrets.SES_SMTP_FROM }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: python3 notify_offline_cameras.py

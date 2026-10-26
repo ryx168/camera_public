@@ -1,0 +1,284 @@
+name: Camera Summary
+
+# Builds the camera summary in the cloud and publishes it to Google Drive.
+#
+# The house upstream is 2.9 Mbps, so uploading the analysis from the NAS costs
+# hours of saturated upload every day. Twitch already holds the footage, so a
+# runner fetches it cloud-to-cloud, analyses it here, and writes the result
+# straight to Drive - the home connection is never involved.
+#
+# No camera access and no Tailscale: this job only needs Twitch (public) and
+# the Drive credentials. That is why it is separate from the stream workflow.
+
+on:
+  schedule:
+    # Every 6 hours, the same shape as the stream workflow - one long job that
+    # holds itself open, started by a cron that only has to fire occasionally.
+    #
+    # Asking for a run every 15 minutes does not work and cannot be tuned into
+    # working. Measured over two days, this repository is granted about five
+    # scheduled runs a DAY whatever the cron says: the ticks are not delayed,
+    # they are silently discarded. The stream workflow asks for one run every
+    # 6 hours and gets the same ~4-5 hour spacing, so the budget belongs to the
+    # repository, not to the schedule.
+    #
+    # The 15-minute cadence therefore lives inside the job instead - see
+    # "Analyse on a loop" below. This cron only has to start one.
+    #
+    # Offset from the stream workflow's '0 */6' so the two do not start
+    # together. A tick arriving while a loop is still running is not wasted: it
+    # queues (see cancel-in-progress) and begins the moment the loop ends.
+    - cron: '20 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "Day to build (YYYY-MM-DD). Blank = today."
+        required: false
+      window_hours:
+        description: "Only look back this many hours. Blank = the whole day."
+        required: false
+      rebuild:
+        description: "Discard the day's cache and analyse it again from scratch"
+        type: boolean
+        default: false
+      loop_minutes:
+        description: "How long to keep analysing. 0 = a single pass and exit."
+        required: false
+
+# Never overlap: a second copy would fight the first over the Drive cache.
+concurrency:
+  group: camera-summary
+  # Let a run finish. The analysis cache is only pushed to Drive at the end, so
+  # cancelling a run throws away every clip it downloaded and analysed - up to
+  # half an hour of work - and the next run has to do all of it again. That is
+  # how a cancelled run also came to post a failed Pages deployment.
+  #
+  # This cannot pile up: GitHub keeps at most one pending run per concurrency
+  # group and discards the older one, so the queue is never deeper than one.
+  # That single pending run is load-bearing here - it is what takes over the
+  # instant the current loop exits.
+  cancel-in-progress: false
+
+# The site deploy needs these; the build job itself only reads the repo.
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    # Same environment as every other workflow here. Without this, secrets
+    # stored on the environment rather than the repository resolve to an empty
+    # string and the job fails at "Configure rclone" - which is exactly what
+    # happened on the first two runs. camera-access has no protection rules,
+    # so this adds no approval step.
+    environment: camera-access
+    # The loop below stops at LOOP_MINUTES; this only has to leave room for
+    # the publish steps that follow it. Actions hard-caps a job at 6 hours.
+    timeout-minutes: 355
+    # Tells the deploy job whether there is anything to deploy. Without it the
+    # deploy runs on a cancelled or failed run, finds no artifact, and posts a
+    # red failed deployment - which at this cadence happens constantly, because
+    # cancel-in-progress kills the previous run before it uploads anything.
+    outputs:
+      site: ${{ steps.site.outputs.has_site }}
+    env:
+      # Runners are UTC. Without this every timestamp in the report is seven
+      # hours out, the half-hour buckets land in the wrong slots, and - worst -
+      # date.today() rolls over at 17:00 local, so an evening run builds
+      # tomorrow's empty day instead of today's. The NAS and the stream
+      # workflow both use this zone; they must agree or they fight over the
+      # same Drive paths with different day boundaries.
+      TZ: America/Vancouver
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          # tesseract reads the camera name and the burnt-in clock out of the
+          # mosaic; without it the analyser cannot tell the panes apart.
+          sudo apt-get install -y ffmpeg tesseract-ocr tesseract-ocr-eng
+          python3 -m pip install --break-system-packages \
+            opencv-python-headless numpy pytesseract yt-dlp
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone
+        env:
+          # Accept the usual spellings, because a secret under a name this job
+          # does not read looks identical to no secret at all. Which one is
+          # present is reported below by LENGTH ONLY - a value is never echoed.
+          CONF_A: ${{ secrets.RCLONE_CONF }}
+          CONF_B: ${{ secrets.RCLONE_CONFIG }}
+          CONF_C: ${{ secrets.GDRIVE_RCLONE_CONF }}
+          CONF_B64: ${{ secrets.RCLONE_CONF_B64 }}
+          CONF_VAR: ${{ vars.RCLONE_CONF }}
+        run: |
+          echo "Candidates visible to this job (length only, never the value):"
+          for n in CONF_A CONF_B CONF_C CONF_B64 CONF_VAR; do
+            eval "v=\${$n}"
+            echo "  $n: ${#v} chars"
+          done
+
+          CONF="${CONF_A:-${CONF_B:-${CONF_C:-${CONF_VAR:-}}}}"
+          if [ -z "$CONF" ] && [ -n "$CONF_B64" ]; then
+            echo "decoding the base64 variant"
+            CONF="$(printf '%s' "$CONF_B64" | base64 -d)"
+          fi
+
+          if [ -z "$CONF" ]; then
+            echo "::error::No rclone config reached this job."
+            echo "::error::Add it as a SECRET named RCLONE_CONF - either on the"
+            echo "::error::repository or on the camera-access environment."
+            echo "::error::A VARIABLE of that name will not work for secrets."
+            exit 1
+          fi
+
+          mkdir -p ~/.config/rclone
+          printf '%s' "$CONF" > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+
+          # Pasting through some editors turns real newlines into literal \n,
+          # which leaves a file rclone cannot parse. Detect and repair.
+          if ! grep -q '^\[' ~/.config/rclone/rclone.conf; then
+            echo "no [section] header found - repairing escaped newlines"
+            printf '%b' "$CONF" > ~/.config/rclone/rclone.conf
+          fi
+
+          echo "remotes found:"
+          rclone listremotes
+
+      - name: Analyse on a loop
+        env:
+          TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL || 'elarathornfield168' }}
+          DAY: ${{ inputs.day }}
+          # Blank on a scheduled run: analyse everything for the day that
+          # is not cached yet, rather than a fixed slice of the clock.
+          WINDOW_HOURS: ${{ inputs.window_hours }}
+          REBUILD: ${{ inputs.rebuild && '1' || '0' }}
+          RCLONE_REMOTE: gdrive:camera_archive
+          LOOP_MINUTES: ${{ inputs.loop_minutes || '330' }}
+          INTERVAL_MINUTES: '15'
+        run: |
+          set -u
+          # One long job analysing every 15 minutes, because the scheduler
+          # cannot be relied on to start a short one that often. A pass that
+          # fails must not end the loop - the next pass simply picks up what
+          # the failed one did not cache.
+          
+          # Clone the gh-pages branch so we have git history for the site
+          git clone --branch gh-pages https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git site || mkdir -p site
+          
+          if [ "$LOOP_MINUTES" = "0" ]; then
+            echo "single pass requested"
+            python3 summary_job.py
+            exit 0
+          fi
+
+          end=$(( $(date +%s) + LOOP_MINUTES * 60 ))
+          pass=0
+          while [ "$(date +%s)" -lt "$end" ]; do
+            pass=$(( pass + 1 ))
+            started=$(date +%s)
+            echo "::group::pass $pass  $(date '+%H:%M %Z')"
+            # Only the final pass writes the digest onto the run page; every
+            # pass appending would blow the step-summary size limit.
+            GITHUB_STEP_SUMMARY="" python3 summary_job.py               || echo "::warning::pass $pass failed - continuing"
+            
+            # Assembly and push inside the loop
+            python3 publish_site.py || echo "::warning::site not assembled"
+            if [ -f site/index.html ]; then
+              cd site
+              if [ ! -d .git ]; then
+                git init
+                git checkout -b gh-pages
+                git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+              fi
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git add .
+              git commit -m "Update site: pass $pass" || true
+              git push origin gh-pages || echo "::warning::failed to push site"
+              cd ..
+            fi
+            
+            echo "::endgroup::"
+
+            took=$(( $(date +%s) - started ))
+            left=$(( end - $(date +%s) ))
+            [ "$left" -le 0 ] && break
+            # Pace from the start of the pass, so a slow pass does not push
+            # the whole schedule later and later.
+            nap=$(( INTERVAL_MINUTES * 60 - took ))
+            [ "$nap" -lt 30 ] && nap=30
+            [ "$nap" -gt "$left" ] && nap=$left
+            echo "pass $pass took ${took}s - next in ${nap}s"
+            sleep "$nap"
+          done
+
+          echo "loop finished after $pass pass(es) - final pass"
+          python3 summary_job.py
+          
+          python3 publish_site.py || echo "::warning::site not assembled"
+          if [ -f site/index.html ]; then
+            cd site
+            if [ ! -d .git ]; then
+              git init
+              git checkout -b gh-pages
+              git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "Update site: final pass" || true
+            git push origin gh-pages || echo "::warning::failed to push site"
+            cd ..
+          fi
+
+      - name: Email the summary
+        if: always()
+        env:
+          DAY: ${{ inputs.day }}
+          SES_SMTP_HOST: ${{ secrets.SES_SMTP_HOST }}
+          SES_SMTP_PORT: ${{ secrets.SES_SMTP_PORT }}
+          SES_SMTP_USER: ${{ secrets.SES_SMTP_USER }}
+          SES_SMTP_PASS: ${{ secrets.SES_SMTP_PASS }}
+          SES_SMTP_FROM: ${{ secrets.SES_SMTP_FROM }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME || secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+        run: |
+          # The report is already on Drive by now, so a mail failure must not
+          # fail the run - the script warns and exits 0 on its own.
+          if [ -f archive/state/drive_folder_id.txt ]; then
+            export DRIVE_FOLDER_ID="$(cat archive/state/drive_folder_id.txt)"
+          fi
+          python3 summary_email.py
+
+      - name: Upload the report page
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # The self-contained page: download, open, done. GitHub will not
+          # render an artifact as a web page, so the digest on the run page
+          # above is the "view without downloading" route.
+          name: summary-page
+          path: archive/daily/*/summary/summary-*.html
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: summary-logs
+          path: archive/logs/
+          if-no-files-found: ignore
+          retention-days: 7

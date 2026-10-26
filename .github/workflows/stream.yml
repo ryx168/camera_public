@@ -1,0 +1,204 @@
+name: Camera Stream Workflow
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+# One live stream at a time: the job may run 6h and the cron fires every 6h,
+# so without this a scheduled run overlaps the previous one and both push to
+# the same Twitch ingest.
+concurrency:
+  group: camera-stream
+  cancel-in-progress: true
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: camera-access
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Upgrade Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          echo "✅ Tailscale version: $(tailscale version)"
+      
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:shared
+          hostname: github-camera-stream
+          args: --accept-routes
+      
+      - name: Verify Connection
+        run: |
+          echo "📡 Tailscale Status:"
+          tailscale status
+          echo ""
+          echo "🌐 My IP:"
+          tailscale ip -4
+          echo ""
+          echo "🔍 Testing QNAP connectivity..."
+          
+          PRIMARY_QNAP="100.81.101.86"   # NAS61536A  (subnet router, primary)
+          FAILOVER_QNAP="100.73.152.14"  # NASF604EB  (subnet router, standby)
+          
+          if ping -c 3 $PRIMARY_QNAP > /dev/null 2>&1; then
+            echo "✅ Primary QNAP reachable ($PRIMARY_QNAP)"
+            echo "QNAP_IP=$PRIMARY_QNAP" >> $GITHUB_ENV
+          elif ping -c 3 $FAILOVER_QNAP > /dev/null 2>&1; then
+            echo "⚠️ Primary down, using failover QNAP ($FAILOVER_QNAP)"
+            echo "QNAP_IP=$FAILOVER_QNAP" >> $GITHUB_ENV
+          else
+            echo "❌ Both QNAPs unreachable"
+            exit 1
+          fi
+      
+      - name: Setup SSH Tunnel to QNAP
+        run: |
+          # Install dependencies
+          sudo apt-get update
+          sudo apt-get install -y sshpass socat
+          
+          echo "Setting up SSH tunnel through QNAP for camera access..."
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl fonts-freefont-ttf python3-pip python3-opencv
+          python3 -m pip install --break-system-packages opencv-python-headless numpy requests || true
+
+      
+      - name: Setup Environment
+        run: |
+          mkdir -p /tmp/camera-recordings
+          mkdir -p logs
+          export TZ="America/Vancouver"
+          echo "TZ=America/Vancouver" >> $GITHUB_ENV
+          echo "🕐 Current time: $(date)"
+
+      - name: Wait for Routes
+        run: |
+          echo "⏳ Waiting for subnet routes via $QNAP_IP..."
+          sleep 10
+          for i in {1..36}; do
+            if ip route show table all | grep -q "192.168.1"; then
+              echo "✅ Routes established!"
+              break
+            fi
+            echo "Attempt $i/36: Waiting..."
+            sleep 5
+          done
+
+          if ! ip route show table all | grep -q "192.168.1"; then
+            echo "❌ Routes never appeared"
+            tailscale status
+            exit 1
+          fi
+      
+      - name: Test Camera Access
+        env:
+          CAM_PASS: ${{ secrets.CAM_PASS }}
+          WYZE_PASS: ${{ secrets.WYZE_PASS }}
+        run: |
+          echo "🔍 Testing camera connectivity..."
+          
+          declare -A CAMERAS=(
+              ["Office"]="http://192.168.1.31/video.cgi"
+              ["Front"]="http://admin:${CAM_PASS}@192.168.1.38/video.cgi"
+              ["Kitchen"]="http://admin:${CAM_PASS}@192.168.1.33/video.cgi"
+              ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.35/video.cgi"
+              ["Backyard"]="http://admin:${CAM_PASS}@192.168.1.39/video.cgi"
+              ["Control Room"]="rtsps://harry:${WYZE_PASS}@192.168.1.146:322/stream0"
+          )
+          
+          ONLINE_COUNT=0
+          for name in Office Front Kitchen Balcony Backyard "Control Room"; do
+              url="${CAMERAS[$name]}"
+              [ -z "$url" ] && { echo "⚠️  $name skipped (no URL / secret unset)"; continue; }
+              case "$url" in
+                  rtsp://*|rtsps://*) probe=(timeout 30 ffmpeg -v error -rtsp_transport tcp -i "$url" -t 1 -f null -) ;;
+                  *)                  probe=(timeout 8 curl -s -I "$url") ;;
+              esac
+              if out=$("${probe[@]}" 2>&1); then
+                  echo "✅ $name camera is online"
+                  ONLINE_COUNT=$((ONLINE_COUNT + 1))
+              else
+                  echo "❌ $name camera is offline"
+                  case "$url" in
+                      rtsp://*|rtsps://*) echo "     ↳ $(echo "$out" | tail -1)" ;;
+                  esac
+              fi
+          done
+          
+          echo ""
+          echo "📹 $ONLINE_COUNT camera(s) accessible — continuing to stream..."
+      
+      - name: Alert on unreachable cameras
+        # Runs on the same Tailscale path the stream uses, so it reports
+        # reachability as the stream will actually experience it. Never
+        # fails the job: a camera being down is news, not a reason to
+        # abandon recording the ones that are up.
+        continue-on-error: true
+        env:
+          CAM_PASS: ${{ secrets.CAM_PASS }}
+          WYZE_PASS: ${{ secrets.WYZE_PASS }}
+          SES_SMTP_HOST: ${{ secrets.SES_SMTP_HOST }}
+          SES_SMTP_PORT: ${{ secrets.SES_SMTP_PORT }}
+          SES_SMTP_USER: ${{ secrets.SES_SMTP_USER }}
+          SES_SMTP_PASS: ${{ secrets.SES_SMTP_PASS }}
+          SES_SMTP_FROM: ${{ secrets.SES_SMTP_FROM }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: python3 notify_offline_cameras.py
+
+      - name: Stream to Twitch
+        timeout-minutes: 355
+        env:
+          TWITCH_KEY: ${{ secrets.TWITCH_KEY }}
+          CAM_PASS: ${{ secrets.CAM_PASS }}
+          WYZE_PASS: ${{ secrets.WYZE_PASS }}
+        run: |
+          chmod +x start-stream.sh twitch.sh
+
+          echo "$(date) - 🎥 Starting camera capture (start-stream.sh)..."
+          ./start-stream.sh &
+          START_STREAM_PID=$!
+          echo "start-stream.sh PID: $START_STREAM_PID"
+
+          # Give start-stream.sh time to begin capturing
+          sleep 15
+
+          echo "$(date) - 📡 Starting Twitch streamer (twitch.sh)..."
+          ./twitch.sh &
+          TWITCH_PID=$!
+          echo "twitch.sh PID: $TWITCH_PID"
+
+          # Wait for twitch.sh (main controller); if it exits, stop start-stream.sh too
+          wait $TWITCH_PID
+          echo "$(date) - ✅ twitch.sh finished"
+
+          kill $START_STREAM_PID 2>/dev/null || true
+          echo "$(date) - 🛑 start-stream.sh stopped"
+      
+      - name: Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-logs
+          path: logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
