@@ -72,3 +72,4 @@ videos.json
 
 # Runtime capture output (start-stream.sh / twitch.sh)
 recordings/
+vod_staging/
