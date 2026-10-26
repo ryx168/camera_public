@@ -1166,8 +1166,28 @@ def write_outputs(day, out, summ, events, incidents, hourly, hours_dir,
 
     # ---------- headline ----------
     if not incidents:
-        headline = "Nothing moved all day."
-        sub = "%d clips checked across %d cameras." % (uniq, len(cams))
+        # "Nothing moved" must not be claimed for a day that was barely
+        # recorded. `covered` holds the half-hour slots that actually had
+        # footage, so a full day is 48 and a normal ~14h stream day is ~28.
+        # Below 24 slots (12 hours) the honest headline is the coverage gap,
+        # not reassurance - a surveillance page that says "nothing happened"
+        # about hours it never watched is worse than one that admits the gap.
+        slots = len(covered)
+        if slots >= 24:
+            headline = "Nothing moved all day."
+            sub = "%d clips checked across %d cameras." % (uniq, len(cams))
+        else:
+            if slots == 0:
+                span = "no footage at all"
+            elif slots == 1:
+                span = "only 30 minutes of footage"
+            else:
+                hrs = slots / 2.0
+                span = ("only %s hours of footage"
+                        % (("%.1f" % hrs).rstrip("0").rstrip(".")))
+            headline = "No motion found, but %s." % span
+            sub = ("%d clips checked across %d cameras &mdash; the rest of the "
+                   "day was not recorded." % (uniq, len(cams)))
     else:
         longest = max(incidents, key=lambda i: i["duration"])
         top_cam = max(per_cam.items(), key=lambda kv: kv[1])
