@@ -324,8 +324,10 @@ def main():
         print("   or ignores RTSP and HTTP would show that.")
 
     print("")
-    print("   The camera table lives in TWO files, which must move together:")
-    print("     start-stream.sh   and   .github/workflows/stream.yml")
+    print("   The camera table lives in THREE files, which must move together:")
+    print("     start-stream.sh")
+    print("     .github/workflows/stream.yml")
+    print("     notify_offline_cameras.py   <- the one that gets forgotten")
 
 
 main()

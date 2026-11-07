@@ -28,13 +28,19 @@ from email.mime.text import MIMEText
 
 CAM_PASS = os.environ.get("CAM_PASS", "")
 WYZE_PASS = os.environ.get("WYZE_PASS", "")
+REOLINK_PASS = os.environ.get("REOLINK_PASS", "")
 
 # Same order and addresses as start-stream.sh, so the report matches the panes.
+# This is the THIRD copy of the table (start-stream.sh, stream.yml, here) and
+# it had been left behind: it still probed .35 for Balcony long after that
+# camera died, so the alert email was permanently wrong in both directions -
+# it cried about a retired camera and could not have noticed the new one
+# failing. If you edit one table, edit all three.
 CAMERAS = [
     ("Office",       "http://192.168.1.31/video.cgi"),
-    ("Front",        "http://admin:%s@192.168.1.38/video.cgi" % CAM_PASS),
+    ("Front",        "rtsp://admin:%s@192.168.1.211:554/h264Preview_01_sub" % REOLINK_PASS),
     ("Kitchen",      "http://admin:%s@192.168.1.33/video.cgi" % CAM_PASS),
-    ("Balcony",      "http://admin:%s@192.168.1.35/video.cgi" % CAM_PASS),
+    ("Balcony",      "http://admin:%s@192.168.1.38/video.cgi" % CAM_PASS),
     ("Backyard",     "http://admin:%s@192.168.1.39/video.cgi" % CAM_PASS),
     ("Control Room", "rtsps://harry:%s@192.168.1.146:322/stream0" % WYZE_PASS),
 ]
@@ -52,7 +58,15 @@ def redact(url):
 
 def probe(url):
     extra = ["-rtsp_transport", "tcp"] if url.startswith("rtsp") else []
-    limit = 15 if url.startswith("rtsp") else 12
+    # Must match start-stream.sh. A healthy camera answers in 9-11s from a
+    # runner over Tailscale, so the old 12s/15s limits sat 1-3s above that and
+    # normal jitter alerted on working cameras. start-stream.sh was raised to
+    # 30/35 for exactly that reason; this file kept the tight ones, so it
+    # reported cameras offline that the stream was happily recording.
+    if url.startswith("rtsp"):
+        limit = int(os.environ.get("CAMERA_PROBE_TIMEOUT_RTSP", "35"))
+    else:
+        limit = int(os.environ.get("CAMERA_PROBE_TIMEOUT", "30"))
     for attempt in range(TRIES):
         try:
             r = subprocess.run(
