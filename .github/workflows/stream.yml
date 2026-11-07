@@ -108,14 +108,15 @@ jobs:
         env:
           CAM_PASS: ${{ secrets.CAM_PASS }}
           WYZE_PASS: ${{ secrets.WYZE_PASS }}
+          REOLINK_PASS: ${{ secrets.REOLINK_PASS }}
         run: |
           echo "🔍 Testing camera connectivity..."
           
           declare -A CAMERAS=(
               ["Office"]="http://192.168.1.31/video.cgi"
-              ["Front"]="http://admin:${CAM_PASS}@192.168.1.38/video.cgi"
+              ["Front"]="rtsp://admin:${REOLINK_PASS}@192.168.1.211:554/h264Preview_01_sub"
               ["Kitchen"]="http://admin:${CAM_PASS}@192.168.1.33/video.cgi"
-              ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.35/video.cgi"
+              ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.38/video.cgi"
               ["Backyard"]="http://admin:${CAM_PASS}@192.168.1.39/video.cgi"
               ["Control Room"]="rtsps://harry:${WYZE_PASS}@192.168.1.146:322/stream0"
           )
@@ -151,6 +152,7 @@ jobs:
         env:
           CAM_PASS: ${{ secrets.CAM_PASS }}
           WYZE_PASS: ${{ secrets.WYZE_PASS }}
+          REOLINK_PASS: ${{ secrets.REOLINK_PASS }}
           SES_SMTP_HOST: ${{ secrets.SES_SMTP_HOST }}
           SES_SMTP_PORT: ${{ secrets.SES_SMTP_PORT }}
           SES_SMTP_USER: ${{ secrets.SES_SMTP_USER }}
@@ -170,6 +172,7 @@ jobs:
           TWITCH_KEY: ${{ secrets.TWITCH_KEY }}
           CAM_PASS: ${{ secrets.CAM_PASS }}
           WYZE_PASS: ${{ secrets.WYZE_PASS }}
+          REOLINK_PASS: ${{ secrets.REOLINK_PASS }}
         run: |
           chmod +x start-stream.sh twitch.sh
 

@@ -9,11 +9,19 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Camera URLs — password from CAM_PASS secret
 CAM_PASS="${CAM_PASS:?CAM_PASS secret is not set}"
+# Reolink RLC-810A at the front door, its own password (REOLINK_PASS), not
+# CAM_PASS. Unset or RTSP-disabled just fails the probe like any offline
+# camera: the pane is kept and fed the placeholder, so nothing reshuffles.
+REOLINK_PASS="${REOLINK_PASS:-}"
 declare -A CAMERA_URLS=(
     ["Office"]="http://192.168.1.31/video.cgi"
-    ["Front"]="http://admin:${CAM_PASS}@192.168.1.38/video.cgi"
+    # 2026-11-06: the Reolink took over the front door and the D-Link that was
+    # here (.38) physically moved to the balcony, retiring .35. h264Preview_01_sub
+    # is the substream - each pane is 640x360, so pulling _main would cost 6x
+    # the bandwidth to be downscaled away.
+    ["Front"]="rtsp://admin:${REOLINK_PASS}@192.168.1.211:554/h264Preview_01_sub"
     ["Kitchen"]="http://admin:${CAM_PASS}@192.168.1.33/video.cgi"
-    ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.35/video.cgi"
+    ["Balcony"]="http://admin:${CAM_PASS}@192.168.1.38/video.cgi"
     ["Backyard"]="http://admin:${CAM_PASS}@192.168.1.39/video.cgi"
 )
 
