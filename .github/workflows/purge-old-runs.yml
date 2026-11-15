@@ -1,0 +1,88 @@
+name: Purge old workflow runs
+
+# WHY THIS EXISTS
+# GitHub auto-creates a `pages-build-deployment` run for every push to
+# gh-pages, and summary.yml pushes the site once every 15 minutes while it is
+# looping - about 88 deployments a day. By 2026-11-14 the repo held 5,711 runs,
+# 4,193 of them pages deployments, which buries the runs anyone actually reads.
+# Nothing here is a fault: it is the cost of a fresh public page, so this job
+# clears the backlog rather than slowing the site down.
+#
+# WHAT IT KEEPS
+# Runs newer than KEEP_DAYS, because their logs are the ONLY record of which
+# cameras were online when. That history is what diagnosed the Balcony drop on
+# 11-11 and the Front outage on 11-08; a shorter window would have destroyed it.
+# In-progress runs are never touched - deleting one would kill a live stream.
+
+on:
+  schedule:
+    # 03:40 UTC Sunday = 20:40 MST Saturday. Deliberately off the :00 and :20
+    # marks, where stream.yml (0 */6) and summary.yml (20 */6) start.
+    - cron: '40 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      keep_days:
+        description: "Keep runs newer than this many days"
+        default: '30'
+      max_delete:
+        description: "Safety cap on deletions in one run"
+        default: '2000'
+
+permissions:
+  actions: write      # required to delete runs
+  contents: read
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Delete runs older than the cutoff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_DAYS: ${{ inputs.keep_days || '30' }}
+          MAX_DELETE: ${{ inputs.max_delete || '2000' }}
+        run: |
+          set -u
+          REPO="${{ github.repository }}"
+          CUTOFF=$(date -u -d "-${KEEP_DAYS} days" +%Y-%m-%d)
+          echo "cutoff: $CUTOFF  (keeping the last $KEEP_DAYS days)"
+
+          BEFORE=$(gh api "repos/$REPO/actions/runs?per_page=1" --jq '.total_count')
+          echo "runs before: $BEFORE"
+
+          # status==completed only: never delete a run that is still going.
+          gh api --paginate "repos/$REPO/actions/runs?per_page=100" \
+            --jq '.workflow_runs[] | select(.status == "completed") | "\(.id)|\(.created_at)"' \
+            > all.txt
+          awk -F'|' -v c="$CUTOFF" '$2 < c {print $1}' all.txt | head -n "$MAX_DELETE" > del.txt
+          N=$(wc -l < del.txt)
+          echo "queued for deletion: $N"
+
+          OK=0; FAIL=0
+          while read -r ID; do
+            [ -z "$ID" ] && continue
+            if gh api -X DELETE "repos/$REPO/actions/runs/$ID" >/dev/null 2>&1; then
+              OK=$((OK+1))
+            else
+              FAIL=$((FAIL+1))
+              # A handful always fail: GitHub refuses to delete a run still tied
+              # to an active deployment. Back off in case it is a rate limit.
+              [ $((FAIL % 10)) -eq 0 ] && sleep 30
+            fi
+            sleep 0.3
+          done < del.txt
+
+          AFTER=$(gh api "repos/$REPO/actions/runs?per_page=1" --jq '.total_count')
+          {
+            echo "### Purge of runs older than $CUTOFF"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| runs before | $BEFORE |"
+            echo "| queued | $N |"
+            echo "| deleted | $OK |"
+            echo "| failed | $FAIL |"
+            echo "| runs after | $AFTER |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "deleted=$OK failed=$FAIL  $BEFORE -> $AFTER"
