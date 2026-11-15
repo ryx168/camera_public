@@ -24,13 +24,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Upgrade Tailscale
-        run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-          echo "✅ Tailscale version: $(tailscale version)"
-      
+      # NO manual "curl install.sh" step here on purpose. It installed the
+      # CURRENT tailscaled (1.104.x) while the v2 action then dropped its own
+      # bundled CLI (1.42.0, from 2023) over /usr/bin/tailscale. `tailscale up`
+      # died in 26 ms against a daemon 60 releases newer than the client, with
+      # only a version-skew warning to show for it, and every later step was
+      # skipped - the stream was down from 11-13 to 11-15 for exactly this.
+      # Let the action own both halves so they always match.
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v2
+        uses: tailscale/github-action@v3
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
