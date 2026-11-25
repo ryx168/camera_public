@@ -2,15 +2,26 @@ name: Camera Stream Workflow
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    # Every 2h, NOT every 6h. The job streams for 5h57m, so a 6h cron left
+    # zero slack: GitHub fires scheduled ticks 30min-3h late and drops some
+    # outright, and every minute of that lateness was a minute of dead air.
+    # Measured 11-11..11-24: a 173-307 min hole EVERY day, 3 ticks landing
+    # out of 4. Ticking every 2h means a replacement run is nearly always
+    # already queued when the live one times out.
+    - cron: '0 */2 * * *'
   workflow_dispatch:
 
-# One live stream at a time: the job may run 6h and the cron fires every 6h,
-# so without this a scheduled run overlaps the previous one and both push to
-# the same Twitch ingest.
+# One live stream at a time -- two runs would push to the same Twitch ingest.
+#
+# cancel-in-progress is FALSE for scheduled ticks on purpose. A queued run
+# waits for the live one to finish and then takes over within ~1 min, which is
+# what closes the gap; GitHub keeps only the newest pending run and cancels
+# the older one, so these do not pile up. A manual workflow_dispatch still
+# cancels the live run and takes over immediately -- that is the "restart it
+# now" button, and queueing it behind a 6h job would break it.
 concurrency:
   group: camera-stream
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 jobs:
   stream:
@@ -53,16 +64,43 @@ jobs:
           PRIMARY_QNAP="100.81.101.86"   # NAS61536A  (subnet router, primary)
           FAILOVER_QNAP="100.73.152.14"  # NASF604EB  (subnet router, standby)
           
-          if ping -c 3 $PRIMARY_QNAP > /dev/null 2>&1; then
-            echo "✅ Primary QNAP reachable ($PRIMARY_QNAP)"
-            echo "QNAP_IP=$PRIMARY_QNAP" >> $GITHUB_ENV
-          elif ping -c 3 $FAILOVER_QNAP > /dev/null 2>&1; then
-            echo "⚠️ Primary down, using failover QNAP ($FAILOVER_QNAP)"
-            echo "QNAP_IP=$FAILOVER_QNAP" >> $GITHUB_ENV
-          else
-            echo "❌ Both QNAPs unreachable"
-            exit 1
-          fi
+          # Wait for a QNAP rather than giving up on the first ping.
+          #
+          # The QNAPs are the subnet routers to 192.168.1.0/24 -- no QNAP, no
+          # cameras. Both were offline in Tailscale from 11-20 21:30 to 11-23
+          # 09:41 MST and this step exited after 24s, so eight consecutive
+          # runs died in ~1 min and the stream was down 9-12h at a stretch.
+          #
+          # Waiting matters MORE now that a replacement run is queued behind
+          # this one: a fast exit would release the concurrency group, the
+          # queued run would start, fail in a minute, and so on -- a tight
+          # retry loop burning runner minutes. Holding the group for up to
+          # 30 min bounds retries to ~2/h during a real outage, and picks the
+          # stream back up within 30s of the NAS returning.
+          DEADLINE=$(( $(date +%s) + 1800 ))
+          QNAP_IP=""
+          while :; do
+            if ping -c 2 -W 3 $PRIMARY_QNAP > /dev/null 2>&1; then
+              echo "✅ Primary QNAP reachable ($PRIMARY_QNAP)"
+              QNAP_IP=$PRIMARY_QNAP
+              break
+            elif ping -c 2 -W 3 $FAILOVER_QNAP > /dev/null 2>&1; then
+              echo "⚠️ Primary down, using failover QNAP ($FAILOVER_QNAP)"
+              QNAP_IP=$FAILOVER_QNAP
+              break
+            fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "❌ Both QNAPs unreachable for 30 min -- giving up"
+              echo "   primary  $PRIMARY_QNAP (NAS61536A)"
+              echo "   failover $FAILOVER_QNAP (NASF604EB)"
+              echo "   Check that tailscaled is running on the NAS and that"
+              echo "   it is advertising 192.168.1.0/24 as a subnet route."
+              exit 1
+            fi
+            echo "   ...no QNAP yet, retrying in 30s ($(( (DEADLINE - $(date +%s)) / 60 ))m left)"
+            sleep 30
+          done
+          echo "QNAP_IP=$QNAP_IP" >> $GITHUB_ENV
       
       - name: Setup SSH Tunnel to QNAP
         run: |
